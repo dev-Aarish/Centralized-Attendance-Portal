@@ -1,5 +1,3 @@
-TeacherAttendance.jsx
-
 import { useEffect, useState } from 'react'
 import AppLayout from '../../components/shared/AppLayout'
 import { getMyAssignedSections, getStudentsInSection } from '../../lib/profile'
@@ -274,4 +272,3 @@ export default function TeacherAttendance() {
     </AppLayout>
   )
 }
-//Keno hoche na commit 
