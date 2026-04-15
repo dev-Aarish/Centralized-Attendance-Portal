@@ -91,3 +91,25 @@ export function onAuthStateChange(callback) {
     callback(session)
   })
 }
+
+export async function signInWithEmail(email, password) {
+  if (!email.endsWith(ALLOWED_DOMAIN)) {
+    return { data: null, error: new Error('Only @heritageit.edu.in accounts are allowed.') }
+  }
+  const { data, error } = await supabase.auth.signInWithPassword({ email, password })
+  return { data, error }
+}
+
+export async function signUpWithEmail(email, password, fullName) {
+  if (!email.endsWith(ALLOWED_DOMAIN)) {
+    return { data: null, error: new Error('Only @heritageit.edu.in accounts are allowed.') }
+  }
+  const { data, error } = await supabase.auth.signUp({
+    email,
+    password,
+    options: {
+      data: { full_name: fullName }
+    }
+  })
+  return { data, error }
+}
