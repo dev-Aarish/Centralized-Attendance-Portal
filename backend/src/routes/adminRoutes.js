@@ -176,19 +176,19 @@ router.get('/users/:id', async (req, res) => {
       createdAt: data.created_at,
       studentDetails: data.student_profiles?.[0]
         ? {
-            rollNumber: data.student_profiles[0].roll_number,
-            department: data.student_profiles[0].department,
-            yearOfStudy: data.student_profiles[0].year_of_study,
-            section: data.student_profiles[0].section,
-            enrollmentsCount: data.student_profiles[0].enrollments?.[0]?.count || 0,
-          }
+          rollNumber: data.student_profiles[0].roll_number,
+          department: data.student_profiles[0].department,
+          yearOfStudy: data.student_profiles[0].year_of_study,
+          section: data.student_profiles[0].section,
+          enrollmentsCount: data.student_profiles[0].enrollments?.[0]?.count || 0,
+        }
         : null,
       teacherDetails: data.teacher_profiles?.[0]
         ? {
-            employeeId: data.teacher_profiles[0].employee_id,
-            department: data.teacher_profiles[0].department,
-            assignmentsCount: data.teacher_profiles[0].teacher_assignments?.[0]?.count || 0,
-          }
+          employeeId: data.teacher_profiles[0].employee_id,
+          department: data.teacher_profiles[0].department,
+          assignmentsCount: data.teacher_profiles[0].teacher_assignments?.[0]?.count || 0,
+        }
         : null,
     }
 
@@ -337,6 +337,107 @@ router.post('/courses', async (req, res) => {
 })
 
 /**
+ * DELETE /api/v1/admin/courses/:id
+ * Delete a course by ID along with all related data (sections, enrollments, attendance, assignments, notes)
+ */
+router.delete('/courses/:id', async (req, res) => {
+  try {
+    const { id: courseId } = req.params
+    const supabase = req.supabase
+
+    // Get all sections for this course
+    const { data: sections, error: sectionsError } = await supabase
+      .from('class_sections')
+      .select('id')
+      .eq('course_id', courseId)
+
+    if (sectionsError) {
+      return res.status(500).json({ error: sectionsError.message })
+    }
+
+    const sectionIds = (sections || []).map(s => s.id)
+
+    // Delete related data for each section
+    if (sectionIds.length > 0) {
+      // Delete attendance records
+      await supabase
+        .from('attendance_records')
+        .delete()
+        .in('session_id', (
+          await supabase
+            .from('attendance_sessions')
+            .select('id')
+            .in('section_id', sectionIds)
+        ).data?.map(s => s.id) || [])
+
+      // Delete attendance sessions
+      const { error: attendanceError } = await supabase
+        .from('attendance_sessions')
+        .delete()
+        .in('section_id', sectionIds)
+      if (attendanceError) console.error('Error deleting attendance sessions:', attendanceError)
+
+      // Delete content/notes
+      const { error: contentError } = await supabase
+        .from('course_content')
+        .delete()
+        .eq('course_id', courseId)
+      if (contentError) console.error('Error deleting content:', contentError)
+
+      // Delete teacher assignments
+      const { error: assignmentError } = await supabase
+        .from('teacher_assignments')
+        .delete()
+        .in('section_id', sectionIds)
+      if (assignmentError) console.error('Error deleting assignments:', assignmentError)
+
+      // Delete enrollments
+      const { error: enrollmentError } = await supabase
+        .from('enrollments')
+        .delete()
+        .in('section_id', sectionIds)
+      if (enrollmentError) console.error('Error deleting enrollments:', enrollmentError)
+
+      // Delete marks
+      const { error: marksError } = await supabase
+        .from('marks')
+        .delete()
+        .in('section_id', sectionIds)
+      if (marksError) console.error('Error deleting marks:', marksError)
+
+      // Delete class schedules
+      const { error: scheduleError } = await supabase
+        .from('class_schedules')
+        .delete()
+        .in('class_section_id', sectionIds)
+      if (scheduleError) console.error('Error deleting schedules:', scheduleError)
+
+      // Delete the sections themselves
+      const { error: sectionDeleteError } = await supabase
+        .from('class_sections')
+        .delete()
+        .in('id', sectionIds)
+      if (sectionDeleteError) console.error('Error deleting sections:', sectionDeleteError)
+    }
+
+    // Delete the course
+    const { error: deleteError } = await supabase
+      .from('courses')
+      .delete()
+      .eq('id', courseId)
+
+    if (deleteError) {
+      return res.status(400).json({ error: deleteError.message })
+    }
+
+    return res.json({ message: 'Course and all related resources deleted successfully' })
+  } catch (err) {
+    console.error('DELETE /admin/courses/:id error:', err)
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+/**
  * GET /api/v1/admin/courses/:id/sections
  * Get all class sections for a course
  */
@@ -369,6 +470,8 @@ router.get('/courses/:id/sections', async (req, res) => {
       section: s.section,
       yearOfStudy: s.year_of_study,
       department: s.department,
+      courseCode: s.courses?.code || 'N/A',
+      courseName: s.courses?.name || 'Unknown',
       course: s.courses,
       studentsEnrolled: s.enrollments?.[0]?.count || 0,
       teachersAssigned: s.teacher_assignments?.[0]?.count || 0,
@@ -853,7 +956,7 @@ router.get('/teacher-assignments', async (req, res) => {
         )
       `)
       .eq('teacher_id', teacherProfile.id)
-      .order('created_at', { ascending: false })
+      .order('assigned_at', { ascending: false })
 
     if (error) {
       return res.status(500).json({ error: error.message })
@@ -979,6 +1082,113 @@ router.delete('/teacher-assignments/:id', async (req, res) => {
     return res.json({ success: true })
   } catch (err) {
     console.error('DELETE /admin/teacher-assignments/:id error:', err)
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+/**
+ * GET /api/v1/admin/departments/:code/teachers
+ * Get all teachers in a specific department
+ */
+router.get('/departments/:code/teachers', async (req, res) => {
+  try {
+    const { code } = req.params
+    const supabase = req.supabase
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .select(`
+        id,
+        email,
+        full_name,
+        college_name,
+        created_at,
+        teacher_profiles (id, employee_id, department)
+      `)
+      .eq('role', 'teacher')
+
+    if (error) {
+      return res.status(500).json({ error: error.message })
+    }
+
+    // Filter by department on the backend
+    const filtered = (data || []).filter(
+      (teacher) => teacher.teacher_profiles?.[0]?.department === code.toUpperCase()
+    )
+
+    const enriched = filtered.map((teacher) => ({
+      id: teacher.id,
+      fullName: teacher.full_name,
+      email: teacher.email,
+      employeeId: teacher.teacher_profiles?.[0]?.employee_id || 'N/A',
+      department: teacher.teacher_profiles?.[0]?.department,
+      collegeName: teacher.college_name,
+      createdAt: teacher.created_at,
+    }))
+
+    return res.json({ data: enriched })
+  } catch (err) {
+    console.error('GET /admin/departments/:code/teachers error:', err)
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+/**
+ * GET /api/v1/admin/departments/:code/students
+ * Get all students in a specific department, grouped by year of study
+ */
+router.get('/departments/:code/students', async (req, res) => {
+  try {
+    const { code } = req.params
+    const supabase = req.supabase
+
+    const { data, error } = await supabase
+      .from('profiles')
+      .select(`
+        id,
+        email,
+        full_name,
+        college_name,
+        created_at,
+        student_profiles (id, roll_number, department, year_of_study)
+      `)
+      .eq('role', 'student')
+
+    if (error) {
+      return res.status(500).json({ error: error.message })
+    }
+
+    // Filter by department and group students by year of study
+    const groupedByYear = {}
+      ; (data || []).forEach((student) => {
+        const studentProfile = student.student_profiles?.[0]
+
+        // Only include students from the requested department
+        if (studentProfile?.department !== code.toUpperCase()) {
+          return
+        }
+
+        const yearOfStudy = studentProfile?.year_of_study || 'Unknown'
+
+        if (!groupedByYear[yearOfStudy]) {
+          groupedByYear[yearOfStudy] = []
+        }
+
+        groupedByYear[yearOfStudy].push({
+          id: student.id,
+          fullName: student.full_name,
+          email: student.email,
+          rollNumber: studentProfile?.roll_number || 'N/A',
+          department: studentProfile?.department,
+          yearOfStudy: yearOfStudy,
+          collegeName: student.college_name,
+          createdAt: student.created_at,
+        })
+      })
+
+    return res.json({ data: groupedByYear })
+  } catch (err) {
+    console.error('GET /admin/departments/:code/students error:', err)
     return res.status(500).json({ error: 'Internal server error' })
   }
 })
