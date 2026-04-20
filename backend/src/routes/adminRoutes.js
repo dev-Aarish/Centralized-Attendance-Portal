@@ -755,7 +755,11 @@ router.get('/departments/:department/sections', async (req, res) => {
         course_id,
         courses (id, code, name),
         enrollments (count),
-        teacher_assignments (count)
+        teacher_assignments (
+          teacher_profiles (
+            profiles (full_name)
+          )
+        )
       `)
       .eq('department', department.toUpperCase())
       .order('year_of_study, section')
@@ -772,7 +776,7 @@ router.get('/departments/:department/sections', async (req, res) => {
       courseId: s.course_id,
       courses: s.courses,
       studentsEnrolled: s.enrollments?.[0]?.count || 0,
-      teachersAssigned: s.teacher_assignments?.[0]?.count || 0,
+      teacherName: s.teacher_assignments?.[0]?.teacher_profiles?.profiles?.full_name || 'Unassigned',
     }))
 
     return res.json({ data: enriched })
@@ -784,17 +788,19 @@ router.get('/departments/:department/sections', async (req, res) => {
 
 /**
  * GET /api/v1/admin/schedules
- * Get schedules for a class section
- * Query: ?sectionId=xxx
+ * Get schedules for class sections
+ * Query: ?sectionIds=1,2,3 or ?sectionId=1
  */
 router.get('/schedules', async (req, res) => {
   try {
-    const { sectionId } = req.query
+    const { sectionId, sectionIds } = req.query
     const supabase = req.supabase
 
-    if (!sectionId) {
-      return res.status(400).json({ error: 'sectionId is required' })
+    if (!sectionId && !sectionIds) {
+      return res.status(400).json({ error: 'sectionId or sectionIds is required' })
     }
+
+    const ids = sectionIds ? sectionIds.split(',') : [sectionId]
 
     const { data, error } = await supabase
       .from('class_schedules')
@@ -803,10 +809,12 @@ router.get('/schedules', async (req, res) => {
         day,
         time_slot,
         room_number,
+        class_section_id,
+        course_id,
         courses (id, code, name)
       `)
-      .eq('class_section_id', sectionId)
-      .order('day, time_slot')
+      .in('class_section_id', ids)
+      .order('day')
 
     if (error) {
       return res.status(500).json({ error: error.message })
@@ -817,6 +825,8 @@ router.get('/schedules', async (req, res) => {
       day: s.day,
       timeSlot: s.time_slot,
       roomNumber: s.room_number,
+      classSectionId: s.class_section_id,
+      courseId: s.course_id,
       course: s.courses,
     }))
 
@@ -913,6 +923,53 @@ router.delete('/schedules/:id', async (req, res) => {
     return res.json({ success: true })
   } catch (err) {
     console.error('DELETE /admin/schedules/:id error:', err)
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+/**
+ * PUT /api/v1/admin/schedules/replace
+ * Replace schedules for multiple class sections
+ * Body: { sectionIds: [...], schedules: [{class_section_id, course_id, day, time_slot, room_number}] }
+ */
+router.put('/schedules/replace', async (req, res) => {
+  try {
+    const { sectionIds, schedules } = req.body
+    const supabase = req.supabase
+
+    if (!sectionIds || !Array.isArray(sectionIds) || !schedules || !Array.isArray(schedules)) {
+      return res.status(400).json({ error: 'sectionIds and schedules arrays are required' })
+    }
+
+    if (sectionIds.length > 0) {
+      // 1. Delete existing schedules for these sections
+      const { error: deleteError } = await supabase
+        .from('class_schedules')
+        .delete()
+        .in('class_section_id', sectionIds)
+
+      if (deleteError) {
+        return res.status(400).json({ error: deleteError.message })
+      }
+    }
+
+    // 2. Insert new schedules
+    if (schedules.length > 0) {
+      const { data, error: insertError } = await supabase
+        .from('class_schedules')
+        .insert(schedules)
+        .select()
+
+      if (insertError) {
+        return res.status(400).json({ error: insertError.message })
+      }
+
+      return res.status(200).json({ data, success: true })
+    }
+
+    return res.status(200).json({ data: [], success: true })
+  } catch (err) {
+    console.error('PUT /admin/schedules/replace error:', err)
     return res.status(500).json({ error: 'Internal server error' })
   }
 })

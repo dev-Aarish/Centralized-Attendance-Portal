@@ -24,11 +24,10 @@ const getTypeStyles = (courseCode) => {
   return colors[sum % colors.length];
 }
 
-export default function StudentSchedule() {
+export default function TeacherSchedule() {
   const [mounted, setMounted] = useState(false);
   const [schedule, setSchedule] = useState([]);
   const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
   const { user } = useAuth();
 
   useEffect(() => {
@@ -38,111 +37,67 @@ export default function StudentSchedule() {
 
   async function fetchSchedule() {
     try {
-      setError(null);
-      const data = await apiFetch('/api/v1/schedule/student');
-      const rawItems = data.data || [];
-
-      if (rawItems.length === 0) {
-        setSchedule([]);
-        return;
-      }
-
-      const formatted = rawItems
-        .map(s => {
-          // Handle both camelCase and snake_case field names
-          const timeSlot = s.timeSlot || s.time_slot || '';
-          const roomNumber = s.roomNumber || s.room_number || 'TBA';
-
-          // Null-safe time parsing
-          if (!timeSlot) {
-            console.warn('[StudentSchedule] Skipping entry with empty time_slot:', s.id);
-            return null;
-          }
-
-          const timeParts = timeSlot.split('-');
-          const startHour = parseInt(timeParts[0]?.split(':')[0]);
-          const endHour = timeParts.length > 1 ? parseInt(timeParts[1]?.split(':')[0]) : startHour + 1;
-
-          if (isNaN(startHour) || isNaN(endHour)) {
-            console.warn('[StudentSchedule] Invalid time format for entry:', s.id, timeSlot);
-            return null;
-          }
-
-          return {
-            id: s.id,
-            day: s.day,
-            start: startHour,
-            duration: Math.max(1, endHour - startHour),
-            title: s.class_sections?.courses?.name,
-            code: s.class_sections?.courses?.code,
-            instructor: s.class_sections?.teacher_assignments?.[0]?.teacher_profiles?.profiles?.full_name || 'Unassigned',
-            room: roomNumber,
-            section: s.class_sections?.section,
-          };
-        })
-        .filter(Boolean); // Remove any null entries from bad data
-
+      const data = await apiFetch('/api/v1/schedule/teacher');
+      const formatted = (data.data || []).map(s => {
+        const timeParts = s.time_slot.split('-');
+        const startHour = parseInt(timeParts[0].split(':')[0]);
+        const endHour = timeParts.length > 1 ? parseInt(timeParts[1].split(':')[0]) : startHour + 1;
+        
+        return {
+          id: s.id,
+          day: s.day,
+          start: startHour,
+          duration: endHour - startHour,
+          title: s.class_sections?.courses?.name,
+          code: s.class_sections?.courses?.code,
+          room: s.room_number,
+          section: s.class_sections?.section,
+        };
+      });
       setSchedule(formatted);
     } catch (err) {
-      console.error('Error fetching student schedule:', err);
-      setError('Failed to load schedule. Please try again later.');
+      console.error('Error fetching teacher schedule:', err);
     } finally {
       setLoading(false);
     }
   }
 
-  // Get unique section/cohort identifier to display in header
-  const currentSection = schedule.length > 0 ? `Section ${schedule[0].section}` : 'Loading...';
-
   return (
-    <AppLayout title="Schedule">
+    <AppLayout title="My Schedule">
       <div className="p-4 md:p-8 max-w-[1400px] mx-auto min-h-[calc(100vh-80px)] flex flex-col">
         {/* Header Section */}
         <div 
           className={`flex flex-col sm:flex-row sm:items-end justify-between gap-6 mb-8 transition-all duration-700 transform ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-4'}`}
         >
           <div>
-            <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Class Schedule</h1>
-            <p className="text-gray-500 mt-2 text-lg">Your weekly academic timeline</p>
+            <h1 className="text-3xl font-bold text-gray-900 tracking-tight">Teaching Schedule</h1>
+            <p className="text-gray-500 mt-2 text-lg">Your weekly assigned classes</p>
           </div>
           
           <div className="bg-slate-900 rounded-2xl p-4 flex items-center gap-4 shadow-xl shadow-slate-900/10 sm:min-w-[280px]">
             <div className="bg-slate-800 p-3 rounded-xl border border-slate-700">
-              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6 text-indigo-400">
-                <rect width="18" height="18" x="3" y="4" rx="2" ry="2"/>
-                <line x1="16" x2="16" y1="2" y2="6"/>
-                <line x1="8" x2="8" y1="2" y2="6"/>
-                <line x1="3" x2="21" y1="10" y2="10"/>
+              <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-6 h-6 text-emerald-400">
+                <path d="M4 19.5v-15A2.5 2.5 0 0 1 6.5 2H20v20H6.5a2.5 2.5 0 0 1 0-5H20"/>
               </svg>
             </div>
             <div>
-              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Current Section</p>
-              <p className="text-sm font-medium text-slate-200 mt-0.5">{currentSection}</p>
+              <p className="text-xs font-semibold text-slate-400 uppercase tracking-wider">Total Classes</p>
+              <p className="text-sm font-medium text-slate-200 mt-0.5">{schedule.length} Sessions / Week</p>
             </div>
           </div>
         </div>
 
-        {/* Schedule Grid Container - Modern Dark Theme */}
+        {/* Schedule Grid Container */}
         <div 
           className={`flex-1 bg-slate-900 rounded-[2rem] border border-slate-800 shadow-2xl overflow-hidden flex flex-col transition-all duration-1000 delay-100 transform ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}
         >
           {loading ? (
             <div className="flex-1 flex items-center justify-center">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-indigo-500"></div>
-            </div>
-          ) : error ? (
-            <div className="flex-1 flex flex-col items-center justify-center gap-4 text-center px-8">
-              <div className="bg-red-500/10 border border-red-500/30 rounded-2xl p-6 max-w-md">
-                <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-8 h-8 text-red-400 mx-auto mb-3"><circle cx="12" cy="12" r="10"/><line x1="12" x2="12" y1="8" y2="12"/><line x1="12" x2="12.01" y1="16" y2="16"/></svg>
-                <p className="text-red-300 text-sm font-medium">{error}</p>
-                <button onClick={() => { setLoading(true); fetchSchedule(); }} className="mt-4 px-4 py-2 rounded-xl bg-red-500/20 hover:bg-red-500/30 text-red-300 text-xs font-medium transition-colors border border-red-500/30">
-                  Try Again
-                </button>
-              </div>
+              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500"></div>
             </div>
           ) : schedule.length === 0 ? (
             <div className="flex-1 flex items-center justify-center text-slate-500">
-              No schedule found for your enrolled classes.
+              No classes assigned to you yet.
             </div>
           ) : (
             <div className="p-4 md:p-6 overflow-x-auto custom-scrollbar flex-1">
@@ -162,10 +117,9 @@ export default function StudentSchedule() {
                     style={{ gridColumn: `${i+2}/${i+3}`, gridRow: `1/${days.length + 2}` }}
                   ></div>
                 ))}
-                {/* End border for the last column */}
                 <div className="border-l border-slate-800/60 pointer-events-none" style={{ gridColumn: `${timeSlots.length + 2}/${timeSlots.length + 3}`, gridRow: `1/${days.length + 2}` }}></div>
 
-                {/* Horizontal Lines between Days */}
+                {/* Horizontal Lines */}
                 {days.map((_, i) => (
                   <div 
                     key={`hline-${i}`} 
@@ -202,12 +156,11 @@ export default function StudentSchedule() {
                 {/* Animated Schedule Items */}
                 {schedule.map((item, i) => {
                   const dayIndex = days.indexOf(item.day);
-                  if (dayIndex === -1) return null; // Safety check
+                  if (dayIndex === -1) return null;
                   
                   const rowStart = 2 + dayIndex;
                   const rowEnd = rowStart + 1;
 
-                  // Convert start time (e.g. 8) to column index. 8 -> col 2.
                   const colStart = 2 + (item.start - 8);
                   const colEnd = colStart + item.duration;
                   
@@ -242,13 +195,14 @@ export default function StudentSchedule() {
                       </div>
                       
                       <div className="flex flex-col items-center gap-y-1 text-[11px] opacity-85 group-hover:opacity-100 transition-opacity w-full">
-                        <div className="flex items-center gap-1.5 truncate">
-                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3 shrink-0"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
-                          <span className="truncate">{item.room || 'TBA'}</span>
-                        </div>
-                        <div className="flex items-center gap-1.5 truncate">
-                          <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3 shrink-0"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
-                          <span className="truncate">{item.instructor}</span>
+                        <div className="flex items-center justify-between w-full px-1">
+                          <div className="flex items-center gap-1 truncate">
+                            <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3 shrink-0"><path d="M20 10c0 6-8 12-8 12s-8-6-8-12a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/></svg>
+                            <span className="truncate">{item.room || 'TBA'}</span>
+                          </div>
+                          <span className="font-bold bg-black/10 dark:bg-white/10 px-1.5 py-0.5 rounded text-[9px]">
+                            Sec {item.section}
+                          </span>
                         </div>
                       </div>
                     </div>
@@ -258,11 +212,6 @@ export default function StudentSchedule() {
               </div>
             </div>
           )}
-          
-          {/* Subtle footer */}
-          <div className="bg-slate-950/50 px-8 py-4 border-t border-slate-800 flex justify-between items-center text-xs text-slate-500">
-            <p>Targeting 100% attendance</p>
-          </div>
         </div>
 
       </div>
