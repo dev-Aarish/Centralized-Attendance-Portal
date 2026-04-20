@@ -29,6 +29,7 @@ router.get('/role', async (req, res) => {
       .single()
 
 
+
     if (error || !data) return res.json({ data: { role: null } })
     return res.json({ data: { role: data.role } })
   } catch (err) {
@@ -43,13 +44,13 @@ router.get('/student', async (req, res) => {
     const { data, error } = await req.supabase
       .from('student_profiles')
       .select(`
-        *,
-        profiles (
-          full_name,
-          email,
-          college_name
-        )
-      `)
+        *,
+        profiles (
+          full_name,
+          email,
+          college_name
+        )
+      `)
       .eq('profile_id', req.user.id)
       .single()
 
@@ -67,13 +68,13 @@ router.get('/teacher', async (req, res) => {
     const { data, error } = await req.supabase
       .from('teacher_profiles')
       .select(`
-        *,
-        profiles (
-          full_name,
-          email,
-          college_name
-        )
-      `)
+        *,
+        profiles (
+          full_name,
+          email,
+          college_name
+        )
+      `)
       .eq('profile_id', req.user.id)
       .single()
 
@@ -99,14 +100,14 @@ router.get('/assigned-sections', async (req, res) => {
     const { data, error } = await req.supabase
       .from('teacher_assignments')
       .select(`
-        *,
-        class_sections (
-          *,
-          courses (
-            id, code, name, department, semester
-          )
-        )
-      `)
+        *,
+        class_sections (
+          *,
+          courses (
+            id, code, name, department, semester
+          )
+        )
+      `)
       .eq('teacher_id', teacherProfile.id)
 
     if (error) return res.status(400).json({ error: error.message })
@@ -131,14 +132,14 @@ router.get('/enrolled-sections', async (req, res) => {
     const { data, error } = await req.supabase
       .from('enrollments')
       .select(`
-        *,
-        class_sections (
-          *,
-          courses (
-            id, code, name, department, semester
-          )
-        )
-      `)
+        *,
+        class_sections (
+          *,
+          courses (
+            id, code, name, department, semester
+          )
+        )
+      `)
       .eq('student_id', studentProfile.id)
 
     if (error) return res.status(400).json({ error: error.message })
@@ -155,12 +156,12 @@ router.get('/sections/:id/students', async (req, res) => {
     const { data, error } = await req.supabase
       .from('enrollments')
       .select(`
-        *,
-        student_profiles (
-          id, roll_number, year_of_study, section, department,
-          profiles ( full_name, email )
-        )
-      `)
+        *,
+        student_profiles (
+          id, roll_number, year_of_study, section, department,
+          profiles ( full_name, email )
+        )
+      `)
       .eq('class_section_id', req.params.id)
       .order('created_at', { ascending: true })
 
@@ -198,7 +199,7 @@ router.put('/dev-role', async (req, res) => {
  */
 router.post('/onboard', async (req, res) => {
   try {
-    const { role, fullName, department, year, section, rollNumber, employeeId } = req.body
+    const { role, fullName, department, year, section, rollNumber, employeeId, currentSemester } = req.body
     const user = req.user
 
     // Validation
@@ -240,6 +241,7 @@ router.post('/onboard', async (req, res) => {
           {
             profile_id: user.id,
             year_of_study: year,
+            current_semester: currentSemester ? parseInt(currentSemester, 10) : null,
             department: department.toUpperCase(),
             section: section || null,
             roll_number: rollNumber.trim().toUpperCase(),
