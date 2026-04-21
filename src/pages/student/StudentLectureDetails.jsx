@@ -16,6 +16,40 @@ function TeacherCard({ teacher }) {
   const [expanded, setExpanded] = useState(false);
   const visibleRecords = expanded ? teacher.records : teacher.records.slice(0, 4);
   const colors = getPercentageColor(teacher.percentage);
+  const teacherName = teacher.name || teacher.initials || 'Unassigned';
+
+  function getStatusView(status) {
+    if (status === 'late') {
+      return {
+        text: 'L',
+        color: '#fbbf24',
+        icon: (
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#fbbf24" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+            <circle cx="12" cy="12" r="9" />
+            <polyline points="12 7 12 12 15 14" />
+          </svg>
+        ),
+      };
+    }
+
+    if (status === 'present') {
+      return {
+        text: 'P',
+        color: '#34d399',
+        icon: (
+          <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#34d399" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
+        ),
+      };
+    }
+
+    return {
+      text: 'A',
+      color: '#f87171',
+      icon: (
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f87171" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
+      ),
+    };
+  }
 
   return (
     <div style={{
@@ -45,7 +79,7 @@ function TeacherCard({ teacher }) {
           </svg>
         </div>
         <div style={{ flex: 1, minWidth: 0 }}>
-          <p style={{ fontWeight: 700, fontSize: '15px', color: '#e2e8f0', margin: 0 }}>{teacher.initials}</p>
+          <p style={{ fontWeight: 700, fontSize: '15px', color: '#e2e8f0', margin: 0, whiteSpace: 'nowrap', overflow: 'hidden', textOverflow: 'ellipsis' }}>{teacherName}</p>
           <p style={{ fontSize: '12px', color: '#64748b', margin: 0 }}>{teacher.attended}/{teacher.total} classes</p>
         </div>
       </div>
@@ -54,11 +88,14 @@ function TeacherCard({ teacher }) {
       </p>
       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', flex: 1 }}>
         {visibleRecords.map((record, idx) => (
+          (() => {
+            const statusView = getStatusView(record.status);
+            return (
           <div key={idx} style={{
             display: 'flex', alignItems: 'center', justifyContent: 'space-between',
             padding: '10px 14px', borderRadius: '12px',
-            background: record.status === 'present' ? 'rgba(52,211,153,0.08)' : 'rgba(248,113,113,0.08)',
-            border: `1px solid ${record.status === 'present' ? 'rgba(52,211,153,0.15)' : 'rgba(248,113,113,0.15)'}`,
+            background: record.status === 'present' ? 'rgba(52,211,153,0.08)' : record.status === 'late' ? 'rgba(251,191,36,0.08)' : 'rgba(248,113,113,0.08)',
+            border: `1px solid ${record.status === 'present' ? 'rgba(52,211,153,0.15)' : record.status === 'late' ? 'rgba(251,191,36,0.2)' : 'rgba(248,113,113,0.15)'}`,
             transition: 'background 0.2s ease',
           }}>
             <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
@@ -67,20 +104,18 @@ function TeacherCard({ teacher }) {
               </svg>
               <div>
                 <p style={{ fontSize: '13px', fontWeight: 600, color: '#cbd5e1', margin: 0 }}>{record.date}</p>
-                <p style={{ fontSize: '11px', color: '#475569', margin: 0 }}>{record.time}</p>
+                {record.time ? <p style={{ fontSize: '11px', color: '#475569', margin: 0 }}>{record.time}</p> : null}
               </div>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: '5px' }}>
-              {record.status === 'present' ? (
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#34d399" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><polyline points="20 6 9 17 4 12" /></svg>
-              ) : (
-                <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#f87171" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round"><line x1="18" y1="6" x2="6" y2="18" /><line x1="6" y1="6" x2="18" y2="18" /></svg>
-              )}
-              <span style={{ fontSize: '13px', fontWeight: 700, color: record.status === 'present' ? '#34d399' : '#f87171' }}>
-                {record.status === 'present' ? 'P' : 'A'}
+              {statusView.icon}
+              <span style={{ fontSize: '13px', fontWeight: 700, color: statusView.color }}>
+                {statusView.text}
               </span>
             </div>
           </div>
+            );
+          })()
         ))}
       </div>
       {teacher.records.length > 4 && (

@@ -23,7 +23,28 @@ export default function StudentContacts() {
         if (res.error) {
           setError(res.error.message || res.error || 'Failed to load contacts')
         } else {
-          setContacts(res.data || [])
+          const normalizedContacts = (res.data || []).map((subject) => {
+            const teachers = Array.isArray(subject?.teachers) ? subject.teachers.filter(Boolean) : []
+            if (teachers.length > 0) {
+              return { ...subject, teachers }
+            }
+
+            return {
+              ...subject,
+              teachers: [
+                {
+                  id: `unassigned-${subject?.subjectId || 'unknown'}`,
+                  name: 'Unassigned',
+                  role: 'Lecturer',
+                  email: null,
+                  phone: null,
+                  otherDetails: null,
+                },
+              ],
+            }
+          })
+
+          setContacts(normalizedContacts)
         }
       } catch (err) {
         if (controller.signal.aborted) return

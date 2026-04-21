@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import { supabaseAdmin } from '../lib/supabase.js'
 
 const router = Router()
 
@@ -41,32 +42,294 @@ function enrichSubject(subject) {
   return { ...subject, teachers, overallPercentage }
 }
 
+function normalizeYear(value) {
+  if (value == null) return null
+  const raw = String(value).trim().toLowerCase()
+  const numeric = parseInt(raw, 10)
+  if (!Number.isNaN(numeric)) return numeric
+  if (raw.startsWith('1')) return 1
+  if (raw.startsWith('2')) return 2
+  if (raw.startsWith('3')) return 3
+  if (raw.startsWith('4')) return 4
+  return null
+}
+
+function toYearFromSemester(semester) {
+  const sem = parseInt(semester, 10)
+  if (Number.isNaN(sem) || sem <= 0) return null
+  return Math.ceil(sem / 2)
+}
+
+function normalizeDepartment(value) {
+  if (!value) return ''
+  return String(value).trim().toLowerCase().replace(/[^a-z0-9]+/g, '')
+}
+
+function matchesStudentCohort(studentYear, studentSemester, sectionYear, sectionSemester) {
+  const yearMatches = studentYear == null || sectionYear == null || sectionYear === studentYear
+  const semesterMatches = studentSemester == null || sectionSemester == null || sectionSemester === studentSemester
+
+  // If both are available, allow either match so stale semester values
+  // do not hide all sections for a valid year cohort.
+  if (studentYear != null && studentSemester != null) {
+    return yearMatches || semesterMatches
+  }
+
+  return yearMatches && semesterMatches
+}
+
+async function resolveTeacherNameMap(supabase, teacherIds = []) {
+  const ids = Array.from(new Set((teacherIds || []).filter(Boolean)))
+  if (!ids.length) return {}
+
+  const db = supabaseAdmin || supabase
+  const { data, error } = await db
+    .from('teacher_profiles')
+    .select('id, profiles ( full_name )')
+    .in('id', ids)
+
+  if (error) {
+    console.warn('[attendance] teacher name map lookup skipped:', error.message)
+    return {}
+  }
+
+  const map = {}
+  for (const row of data || []) {
+    map[row.id] = row.profiles?.full_name || null
+  }
+  return map
+}
+
+async function getCourseScopedSectionFallbacks(supabase, studentProfile) {
+  const studentYear = normalizeYear(studentProfile.year_of_study) ?? toYearFromSemester(studentProfile.current_semester)
+  const studentSemester = studentProfile.current_semester ? parseInt(studentProfile.current_semester, 10) : null
+  const studentDept = normalizeDepartment(studentProfile.department)
+
+  const { data, error } = await supabase
+    .from('class_sections')
+    .select(`
+      id,
+      section,
+      year_of_study,
+      department,
+      courses!inner ( id, name, code, semester, department )
+    `)
+
+  if (error) {
+    console.error('[attendance] course-scoped section fallback error:', error.message)
+    return []
+  }
+
+  const byCohort = (data || []).filter((row) => {
+    const rowDept = normalizeDepartment(row.department || row.courses?.department)
+    if (studentDept && rowDept && rowDept !== studentDept) return false
+
+    const sectionYear = normalizeYear(row.year_of_study)
+    const sectionSemester = row.courses?.semester ? parseInt(row.courses.semester, 10) : null
+    return matchesStudentCohort(studentYear, studentSemester, sectionYear, sectionSemester)
+  })
+
+  if (!studentProfile.section) return byCohort
+
+  const strictSection = byCohort.filter((row) => row.section === studentProfile.section)
+  return strictSection.length ? strictSection : byCohort
+}
+
 // Shared helper: get the logged-in student's profile row, or null
 async function getStudentProfile(supabase, userId) {
   const { data } = await supabase
     .from('student_profiles')
-    .select('id')
+    .select('id, department, year_of_study, section, current_semester')
     .eq('profile_id', userId)
     .single()
   return data ?? null
 }
 
-// Shared core: build full attendance detail per subject + teacher for a session type.
-// Used by both /details/:type and /summary/:type to avoid duplicated logic.
-async function buildAttendanceDetails(supabase, studentId, sessionType) {
-  // Get all enrolled class sections with course info
-  const { data: enrollments, error: enrollError } = await supabase
+// Ensure enrollments include all sections matching student's cohort
+// so newly offered courses show up without manual per-student enrollment.
+async function syncStudentEnrollments(supabase, studentProfile) {
+  const { data: existingEnrollments } = await supabase
+    .from('enrollments')
+    .select('class_section_id')
+    .eq('student_id', studentProfile.id)
+
+  const existingSectionIds = new Set((existingEnrollments || []).map((e) => e.class_section_id))
+
+  let candidateQuery = supabase
+    .from('class_sections')
+    .select(`
+      id,
+      year_of_study,
+      section,
+      department,
+      courses (semester)
+    `)
+    .eq('department', studentProfile.department)
+
+  if (studentProfile.section) {
+    candidateQuery = candidateQuery.eq('section', studentProfile.section)
+  }
+
+  const { data: candidates } = await candidateQuery
+
+  const studentYear = normalizeYear(studentProfile.year_of_study) ?? toYearFromSemester(studentProfile.current_semester)
+  const studentSemester = studentProfile.current_semester ? parseInt(studentProfile.current_semester, 10) : null
+
+  let matchedSections = (candidates || [])
+    .filter((c) => {
+      const sectionYear = normalizeYear(c.year_of_study)
+      const sectionSemester = c.courses?.semester ? parseInt(c.courses.semester, 10) : null
+
+      return matchesStudentCohort(studentYear, studentSemester, sectionYear, sectionSemester)
+    })
+
+  if (matchedSections.length === 0 && studentProfile.section) {
+    const fallback = await supabase
+      .from('class_sections')
+      .select(`
+        id,
+        section,
+        year_of_study,
+        department,
+        courses ( id, name, code, semester )
+      `)
+      .eq('department', studentProfile.department)
+
+    matchedSections = (fallback.data || []).filter((c) => {
+      const sectionYear = normalizeYear(c.year_of_study)
+      const sectionSemester = c.courses?.semester ? parseInt(c.courses.semester, 10) : null
+      return matchesStudentCohort(studentYear, studentSemester, sectionYear, sectionSemester)
+    })
+  }
+
+  const matchedSectionIds = matchedSections.map((c) => c.id)
+
+  const missingSectionIds = matchedSectionIds.filter((id) => !existingSectionIds.has(id))
+  if (missingSectionIds.length > 0) {
+    await supabase
+      .from('enrollments')
+      .upsert(
+        missingSectionIds.map((classSectionId) => ({
+          student_id: studentProfile.id,
+          class_section_id: classSectionId,
+        })),
+        { onConflict: 'student_id,class_section_id' }
+      )
+  }
+}
+
+async function getEffectiveEnrollmentsForStudent(supabase, studentProfile) {
+  const { data: rawEnrollments, error: enrollError } = await supabase
     .from('enrollments')
     .select(`
       class_section_id,
       class_sections (
         id,
-        courses ( name, code )
+        section,
+        year_of_study,
+        department,
+        courses ( id, name, code, semester )
       )
     `)
-    .eq('student_id', studentId)
+    .eq('student_id', studentProfile.id)
 
-  if (enrollError || !enrollments?.length) return []
+  if (enrollError) return []
+
+  const enrollmentMap = new Map()
+  for (const e of rawEnrollments || []) {
+    enrollmentMap.set(e.class_section_id, e)
+  }
+
+  let candidateQuery = supabase
+    .from('class_sections')
+    .select(`
+      id,
+      section,
+      year_of_study,
+      department,
+      courses ( id, name, code, semester )
+    `)
+    .eq('department', studentProfile.department)
+
+  if (studentProfile.section) {
+    candidateQuery = candidateQuery.eq('section', studentProfile.section)
+  }
+
+  let { data: candidates } = await candidateQuery
+
+  // If strict section match returns nothing, fall back to dept-level cohort matching.
+  if ((!candidates || candidates.length === 0) && studentProfile.section) {
+    const fallback = await supabase
+      .from('class_sections')
+      .select(`
+        id,
+        section,
+        year_of_study,
+        department,
+        courses ( id, name, code, semester )
+      `)
+      .eq('department', studentProfile.department)
+    candidates = fallback.data || []
+  }
+
+  const studentYear = normalizeYear(studentProfile.year_of_study) ?? toYearFromSemester(studentProfile.current_semester)
+  const studentSemester = studentProfile.current_semester ? parseInt(studentProfile.current_semester, 10) : null
+
+  const matchedSections = (candidates || []).filter((c) => {
+    const sectionYear = normalizeYear(c.year_of_study)
+    const sectionSemester = c.courses?.semester ? parseInt(c.courses.semester, 10) : null
+
+    return matchesStudentCohort(studentYear, studentSemester, sectionYear, sectionSemester)
+  })
+
+  const finalSections = matchedSections.length
+    ? matchedSections
+    : await getCourseScopedSectionFallbacks(supabase, studentProfile)
+
+  for (const section of finalSections) {
+    if (!enrollmentMap.has(section.id)) {
+      enrollmentMap.set(section.id, {
+        class_section_id: section.id,
+        class_sections: section,
+      })
+    }
+  }
+
+  return Array.from(enrollmentMap.values())
+}
+
+// Shared core: build full attendance detail per subject + teacher for a session type.
+// Used by both /details/:type and /summary/:type to avoid duplicated logic.
+async function buildAttendanceDetails(supabase, studentId, sessionType) {
+  const { data: studentProfile } = await supabase
+    .from('student_profiles')
+    .select('id, department, year_of_study, section, current_semester')
+    .eq('id', studentId)
+    .single()
+
+  if (!studentProfile) return []
+
+  // Get effective enrollments as union of actual enrollments + inferred
+  // cohort sections to avoid dropping newly offered courses.
+  const enrollments = await getEffectiveEnrollmentsForStudent(supabase, studentProfile)
+  if (!enrollments?.length) return []
+
+  // Initialize subject map from enrollments so subjects appear even when
+  // there are no sessions recorded yet for the requested type.
+  const subjectMap = {}
+  for (const enrollment of enrollments) {
+    const sectionId = enrollment.class_section_id
+    const course = enrollment.class_sections?.courses
+    if (!sectionId || !course) continue
+
+    if (!subjectMap[sectionId]) {
+      subjectMap[sectionId] = {
+        subjectCode: course.code,
+        subjectName: course.name,
+        teachers: {},
+      }
+    }
+  }
 
   const classSectionIds = enrollments.map(e => e.class_section_id)
 
@@ -88,10 +351,24 @@ async function buildAttendanceDetails(supabase, studentId, sessionType) {
     .eq('session_type', sessionType)
     .order('session_date', { ascending: false })
 
-  if (sessionError || !sessions?.length) return []
+  if (sessionError) return []
+  if (!sessions?.length) {
+    return Object.values(subjectMap)
+      .map((subject) => enrichSubject({
+        ...subject,
+        teachers: Object.values(subject.teachers),
+      }))
+      .sort((a, b) => a.subjectName.localeCompare(b.subjectName))
+  }
 
-  // ── Single query: all attendance records for this student across those sessions ──
-  const sessionIds = sessions.map(s => s.id)
+  const teacherNameMap = await resolveTeacherNameMap(
+    supabase,
+    sessions.map((s) => s.teacher_id)
+  )
+
+  const sessionIds = sessions.map((s) => s.id)
+
+  // Single query: student's attendance records for the fetched sessions.
   const { data: records } = await supabase
     .from('attendance_records')
     .select('session_id, status')
@@ -102,16 +379,27 @@ async function buildAttendanceDetails(supabase, studentId, sessionType) {
   const recordMap = {}
   records?.forEach(r => { recordMap[r.session_id] = r.status })
 
-  // ── Single query: schedules for all enrolled sections (for time display) ──
-  const { data: schedules } = await supabase
-    .from('schedules')
-    .select('class_section_id, day_of_week, start_time, end_time')
+  // Primary schedule source: class_schedules (new schema).
+  const { data: classSchedules } = await supabase
+    .from('class_schedules')
+    .select('class_section_id, day, start_time, end_time')
     .in('class_section_id', classSectionIds)
+
+  // Legacy fallback for older deployments still using schedules.
+  let schedules = classSchedules || []
+  if (!schedules.length) {
+    const { data: legacySchedules } = await supabase
+      .from('schedules')
+      .select('class_section_id, day_of_week, start_time, end_time')
+      .in('class_section_id', classSectionIds)
+    schedules = legacySchedules || []
+  }
 
   // Build O(1) lookup: class_section_id + day → { start, end }
   const scheduleMap = {}
   schedules?.forEach(s => {
-    const key = `${s.class_section_id}__${s.day_of_week}`
+    const day = (s.day || s.day_of_week || '').slice(0, 3)
+    const key = `${s.class_section_id}__${day}`
     scheduleMap[key] = { start: s.start_time, end: s.end_time }
   })
 
@@ -124,8 +412,6 @@ async function buildAttendanceDetails(supabase, studentId, sessionType) {
   // Group sessions by class_section, then by teacher
   const DAY_NAMES = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat']
   const MONTH_NAMES = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec']
-
-  const subjectMap = {}
 
   for (const session of sessions) {
     const { class_section_id, teacher_id } = session
@@ -140,12 +426,15 @@ async function buildAttendanceDetails(supabase, studentId, sessionType) {
       }
     }
 
-    const teacherName = session.teacher_profiles?.profiles?.full_name ?? 'Unknown'
+    const teacherKey = teacher_id || 'unassigned'
+    const teacherName = session.teacher_profiles?.profiles?.full_name
+      || teacherNameMap[teacher_id]
+      || (teacher_id ? 'Assigned Teacher' : 'Unassigned')
 
-    if (!subjectMap[class_section_id].teachers[teacher_id]) {
+    if (!subjectMap[class_section_id].teachers[teacherKey]) {
       const nameParts = teacherName.split(' ').filter(Boolean)
       const initials = nameParts.map(p => p[0]).join('').toUpperCase().slice(0, 2)
-      subjectMap[class_section_id].teachers[teacher_id] = {
+      subjectMap[class_section_id].teachers[teacherKey] = {
         name: teacherName,
         initials,
         records: [],
@@ -162,7 +451,7 @@ async function buildAttendanceDetails(supabase, studentId, sessionType) {
       ? `${formatTime(schedule.start)}–${formatTime(schedule.end)}`
       : ''
 
-    subjectMap[class_section_id].teachers[teacher_id].records.push({
+    subjectMap[class_section_id].teachers[teacherKey].records.push({
       date: dateStr,
       time: timeStr,
       status: recordMap[session.id] ?? 'absent',

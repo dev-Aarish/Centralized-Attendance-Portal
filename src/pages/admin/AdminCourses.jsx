@@ -151,7 +151,7 @@ export default function AdminCourses() {
        {submitting ? 'Creating...' : 'Create Course'}
       </button>
      </div>
-    )}[12:16 PM]{courses.length === 0 ? (
+    )}{courses.length === 0 ? (
      <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl px-5 py-8 text-center">
       <p className="text-sm text-gray-400 dark:text-gray-500">No courses found.</p>
      </div>

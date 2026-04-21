@@ -2,6 +2,7 @@ import React, { useState, useEffect } from 'react';
 import AppLayout from '../../components/shared/AppLayout';
 import { apiFetch } from '../../lib/api';
 import { useAuth } from '../../hooks/useAuth';
+import { getMyStudentProfile } from '../../lib/profile';
 
 const timeSlots = Array.from({ length: 10 }, (_, i) => {
   const hour = 8 + i;
@@ -9,6 +10,30 @@ const timeSlots = Array.from({ length: 10 }, (_, i) => {
 });
 
 const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+
+const DAY_MAP = {
+  mon: 'Monday',
+  monday: 'Monday',
+  tue: 'Tuesday',
+  tues: 'Tuesday',
+  tuesday: 'Tuesday',
+  wed: 'Wednesday',
+  wednesday: 'Wednesday',
+  thu: 'Thursday',
+  thur: 'Thursday',
+  thurs: 'Thursday',
+  thursday: 'Thursday',
+  fri: 'Friday',
+  friday: 'Friday',
+  sat: 'Saturday',
+  saturday: 'Saturday',
+};
+
+function normalizeDay(dayValue) {
+  if (!dayValue) return dayValue;
+  const key = String(dayValue).trim().toLowerCase();
+  return DAY_MAP[key] || dayValue;
+}
 
 const getTypeStyles = (courseCode) => {
   if (!courseCode) return 'bg-slate-800/60 border border-slate-600/50 text-slate-200';
@@ -27,6 +52,7 @@ const getTypeStyles = (courseCode) => {
 export default function StudentSchedule() {
   const [mounted, setMounted] = useState(false);
   const [schedule, setSchedule] = useState([]);
+  const [profileSection, setProfileSection] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const { user } = useAuth();
@@ -39,7 +65,12 @@ export default function StudentSchedule() {
   async function fetchSchedule() {
     try {
       setError(null);
-      const data = await apiFetch('/api/v1/schedule/student');
+      const [data, profileRes] = await Promise.all([
+        apiFetch('/api/v1/schedule/student'),
+        getMyStudentProfile(),
+      ]);
+
+      setProfileSection(profileRes?.data?.section || '');
       const rawItems = data.data || [];
 
       if (rawItems.length === 0) {
@@ -70,7 +101,7 @@ export default function StudentSchedule() {
 
           return {
             id: s.id,
-            day: s.day,
+            day: normalizeDay(s.day),
             start: startHour,
             duration: Math.max(1, endHour - startHour),
             title: s.class_sections?.courses?.name,
@@ -91,8 +122,15 @@ export default function StudentSchedule() {
     }
   }
 
-  // Get unique section/cohort identifier to display in header
-  const currentSection = schedule.length > 0 ? `Section ${schedule[0].section}` : 'Loading...';
+  // Resolve section for header safely: prefer section from schedule blocks,
+  // then fall back to student profile section.
+  const firstScheduleSection = schedule.find((item) => item?.section)?.section;
+  const resolvedSection = firstScheduleSection || profileSection || '';
+  const currentSection = loading
+    ? 'Loading...'
+    : resolvedSection
+      ? `Section ${resolvedSection}`
+      : 'Section not assigned';
 
   return (
     <AppLayout title="Schedule">

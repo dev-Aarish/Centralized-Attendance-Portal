@@ -4,6 +4,30 @@ import AppLayout from '../../components/shared/AppLayout'
 import { getMyAssignedSections } from '../../lib/profile'
 import { getTodaySchedule } from '../../lib/schedule'
 
+function parseTime(value) {
+  if (!value || typeof value !== 'string') return null
+  const [h, m] = value.split(':').map(Number)
+  if (Number.isNaN(h) || Number.isNaN(m)) return null
+  return { h, m }
+}
+
+function getClassTiming(cls) {
+  const startRaw = cls.start_time || cls.startTime || null
+  const endRaw = cls.end_time || cls.endTime || null
+
+  if (startRaw && endRaw) {
+    return { startRaw, endRaw }
+  }
+
+  const slot = cls.time_slot || cls.timeSlot || ''
+  if (!slot || typeof slot !== 'string' || !slot.includes('-')) {
+    return { startRaw: null, endRaw: null }
+  }
+
+  const [slotStart, slotEnd] = slot.split('-').map((t) => t.trim())
+  return { startRaw: slotStart || null, endRaw: slotEnd || null }
+}
+
 export default function TeacherDashboard() {
   const navigate = useNavigate()
   const [sections, setSections] = useState([])
@@ -65,12 +89,22 @@ export default function TeacherDashboard() {
             <div className="flex flex-col gap-3">
               {todayClasses.map((cls) => {
                 const now = new Date()
-                const [startH, startM] = cls.start_time.split(':').map(Number)
-                const [endH, endM] = cls.end_time.split(':').map(Number)
-                const start = new Date(); start.setHours(startH, startM, 0)
-                const end = new Date(); end.setHours(endH, endM, 0)
-                const isDone = now > end
-                const isOngoing = now >= start && now <= end
+                const { startRaw, endRaw } = getClassTiming(cls)
+                const startParsed = parseTime(startRaw)
+                const endParsed = parseTime(endRaw)
+
+                const hasValidTime = Boolean(startParsed && endParsed)
+                let isDone = false
+                let isOngoing = false
+
+                if (hasValidTime) {
+                  const start = new Date()
+                  start.setHours(startParsed.h, startParsed.m, 0)
+                  const end = new Date()
+                  end.setHours(endParsed.h, endParsed.m, 0)
+                  isDone = now > end
+                  isOngoing = now >= start && now <= end
+                }
 
                 return (
                   <div
@@ -82,12 +116,12 @@ export default function TeacherDashboard() {
                         {cls.class_sections?.courses?.name}
                       </p>
                       <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-                        {cls.class_sections?.section || 'No section'} · {cls.room || 'No room'}
+                        {cls.class_sections?.section || 'No section'} · {cls.room || cls.room_number || cls.roomNumber || 'No room'}
                       </p>
                     </div>
                     <div className="flex items-center gap-3">
                       <span className="text-xs text-gray-400">
-                        {cls.start_time?.slice(0, 5)} – {cls.end_time?.slice(0, 5)}
+                        {startRaw && endRaw ? `${startRaw.slice(0, 5)} – ${endRaw.slice(0, 5)}` : 'Time TBA'}
                       </span>
                       {isDone && (
                         <span className="text-xs px-2 py-0.5 rounded-full bg-gray-100 dark:bg-gray-800 text-gray-400">Done</span>

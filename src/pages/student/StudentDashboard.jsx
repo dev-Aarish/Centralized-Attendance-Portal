@@ -8,6 +8,7 @@ import AttendanceRings from '../../components/student/AttendanceRings'
 
 // ✅ Fix 1: correct import path — attendanceApi, not attendance
 import { getMyAttendanceSummaryByType } from '../../lib/attendance'
+import { getMyStudentSchedule } from '../../lib/schedule'
 
 // ✅ Fix 3: import profile so we can show the student's real name
 import { getMyStudentProfile } from '../../lib/profile'
@@ -32,10 +33,11 @@ export default function StudentDashboard() {
       setError(null)
 
       try {
-        const [profileRes, lectureRes, labRes] = await Promise.all([
+        const [profileRes, lectureRes, labRes, scheduleRes] = await Promise.all([
           getMyStudentProfile(),
           getMyAttendanceSummaryByType('lecture'),
           getMyAttendanceSummaryByType('lab'),
+          getMyStudentSchedule(),
         ])
 
         if (controller.signal.aborted) return
@@ -44,10 +46,23 @@ export default function StudentDashboard() {
         if (profileRes.error) console.warn('Profile fetch:', profileRes.error)
         if (lectureRes.error) console.warn('Lecture fetch:', lectureRes.error)
         if (labRes.error) console.warn('Lab fetch:', labRes.error)
+        if (scheduleRes.error) console.warn('Schedule fetch:', scheduleRes.error)
+
+        const lectureSummary = lectureRes.data ?? []
+        const labSummary = labRes.data ?? []
+        const hasAttendanceSummary = lectureSummary.length > 0 || labSummary.length > 0
+
+        if (hasAttendanceSummary) {
+          setLectureData(lectureSummary)
+          setLabData(labSummary)
+        } else {
+          const scheduleItems = scheduleRes.data ?? []
+          const fallback = buildZeroAttendanceFromSchedule(scheduleItems)
+          setLectureData(fallback.lecture)
+          setLabData(fallback.lab)
+        }
 
         setProfile(profileRes.data ?? null)
-        setLectureData(lectureRes.data ?? [])
-        setLabData(labRes.data ?? [])
       } catch (err) {
         if (controller.signal.aborted) return
         // ✅ Fix 2: actually call setError so the error UI renders
@@ -134,4 +149,34 @@ export default function StudentDashboard() {
       </div>
     </AppLayout>
   )
+}
+
+function buildZeroAttendanceFromSchedule(scheduleItems) {
+  const lectureMap = new Map()
+  const labMap = new Map()
+
+  for (const item of scheduleItems || []) {
+    const code = item?.class_sections?.courses?.code || ''
+    const name = item?.class_sections?.courses?.name || ''
+    const classType = String(item?.classType || item?.class_type || '').toLowerCase()
+
+    const key = `${code}__${name}`
+    const subject = {
+      name: name || code || 'Unnamed Subject',
+      code: code || '',
+      percentage: 0,
+    }
+
+    const isLab = classType === 'lab' || /\blab\b/i.test(name)
+    if (isLab) {
+      if (!labMap.has(key)) labMap.set(key, subject)
+    } else {
+      if (!lectureMap.has(key)) lectureMap.set(key, subject)
+    }
+  }
+
+  return {
+    lecture: Array.from(lectureMap.values()).sort((a, b) => a.name.localeCompare(b.name)),
+    lab: Array.from(labMap.values()).sort((a, b) => a.name.localeCompare(b.name)),
+  }
 }
