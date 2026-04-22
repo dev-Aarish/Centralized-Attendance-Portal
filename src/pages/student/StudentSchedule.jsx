@@ -37,6 +37,12 @@ function normalizeDay(dayValue) {
 
 const getTypeStyles = (courseCode) => {
   if (!courseCode) return 'bg-slate-800/60 border border-slate-600/50 text-slate-200';
+  
+  // Special Blocks Styling
+  if (courseCode === 'LIB') return 'bg-slate-800/60 border-slate-600/80 border-dashed text-slate-300 shadow-none';
+  if (courseCode === 'REM') return 'bg-orange-900/30 border-orange-800/80 border-dashed text-orange-300 shadow-none';
+  if (courseCode === 'LUNCH') return 'bg-yellow-900/30 border-yellow-800/80 border-dashed text-yellow-300 shadow-none';
+
   const sum = String(courseCode).split('').reduce((a, b) => a + b.charCodeAt(0), 0);
   const colors = [
     'bg-gradient-to-br from-indigo-500/10 to-indigo-600/20 border-indigo-500/30 hover:border-indigo-400/60 text-indigo-50 shadow-[0_4px_20px_-10px_rgba(99,102,241,0.1)]',
@@ -66,7 +72,10 @@ export default function StudentSchedule() {
     try {
       setError(null);
       const [data, profileRes] = await Promise.all([
-        apiFetch('/api/v1/schedule/student'),
+        apiFetch('/api/v1/schedule/student', {
+          cache: false,
+          forceRefresh: true,
+        }),
         getMyStudentProfile(),
       ]);
 
@@ -105,8 +114,8 @@ export default function StudentSchedule() {
             day: normalizeDay(s.day),
             start: startHour,
             duration: Math.max(1, endHour - startHour),
-            title: s.class_sections?.courses?.name,
-            code: s.class_sections?.courses?.code,
+            title: s.courses?.name || s.class_sections?.courses?.name,
+            code: s.courses?.code || s.class_sections?.courses?.code,
             instructor: s.resolved_teacher_name || s.class_sections?.teacher_assignments?.[0]?.teacher_profiles?.profiles?.full_name || 'Unassigned',
             room: roomNumber,
             section: s.class_sections?.section,

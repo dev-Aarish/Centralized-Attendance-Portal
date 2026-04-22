@@ -17,9 +17,9 @@ const COURSE_COLORS = [
 ]
 
 const SPECIAL_BLOCKS = [
-  { id: 'special-library', code: 'LIB', name: 'Library', teacherName: '—', isSpecial: true, specialColor: 'bg-slate-100 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 border-dashed' },
-  { id: 'special-remedial', code: 'REM', name: 'Remedial', teacherName: '—', isSpecial: true, specialColor: 'bg-orange-50 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 border-orange-300 dark:border-orange-800 border-dashed' },
-  { id: 'special-lunch', code: 'LUNCH', name: 'Lunch Break', teacherName: '—', isSpecial: true, specialColor: 'bg-yellow-50 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 border-yellow-300 dark:border-yellow-800 border-dashed' },
+  { id: 'special-library', courseId: 'e5542137-baa2-4a85-beec-e7c146979670', code: 'LIB', name: 'Library', teacherName: '—', isSpecial: true, specialColor: 'bg-slate-100 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 border-dashed' },
+  { id: 'special-remedial', courseId: '3db4ec75-ef9c-4c26-8e14-249cf44d4253', code: 'REM', name: 'Remedial', teacherName: '—', isSpecial: true, specialColor: 'bg-orange-50 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 border-orange-300 dark:border-orange-800 border-dashed' },
+  { id: 'special-lunch', courseId: '24caed6e-c24d-4cfc-818d-c1178db9ec90', code: 'LUNCH', name: 'Lunch Break', teacherName: '—', isSpecial: true, specialColor: 'bg-yellow-50 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 border-yellow-300 dark:border-yellow-800 border-dashed' },
 ]
 
 const getCourseColor = (courseId) => {
@@ -32,6 +32,8 @@ export default function AdminSchedule() {
   const [department, setDepartment] = useState('')
   const [cohorts, setCohorts] = useState([])
   const [selectedCohortId, setSelectedCohortId] = useState('')
+  const [routines, setRoutines] = useState([])
+  const [selectedRoutineId, setSelectedRoutineId] = useState('')
   const [allCourses, setAllCourses] = useState([])
   const [defaultRoom, setDefaultRoom] = useState('')
   const [gridSchedules, setGridSchedules] = useState([])
@@ -50,9 +52,17 @@ export default function AdminSchedule() {
   useEffect(() => { if (department) fetchCohorts() }, [department])
 
   useEffect(() => {
-    if (selectedCohortId) { fetchSchedules(); setSuccessMsg(null); setError(null) }
-    else { setGridSchedules([]) }
+    if (selectedCohortId) { fetchRoutines(); setSuccessMsg(null); setError(null) }
+    else { setRoutines([]); setSelectedRoutineId(''); setGridSchedules([]) }
   }, [selectedCohortId, cohorts])
+
+  useEffect(() => {
+    // Fetch schedules if a routine is selected, OR if there are no routines but a cohort is selected
+    if (selectedRoutineId || (routines.length === 0 && selectedCohortId)) {
+      fetchSchedules(); setSuccessMsg(null); setError(null)
+    }
+    else { setGridSchedules([]) }
+  }, [selectedRoutineId, routines.length, selectedCohortId])
 
   async function fetchAllCourses() {
     try {
@@ -66,49 +76,156 @@ export default function AdminSchedule() {
       setLoading(true)
       const data = await apiFetch(`/api/v1/admin/departments/${department}/sections`)
       const grouped = {}
-      ;(data.data || []).forEach(s => {
-        const key = `Year ${s.yearOfStudy}-Sec ${s.section}`
-        if (!grouped[key]) {
-          grouped[key] = { id: key, yearOfStudy: s.yearOfStudy, section: s.section, label: `Section ${s.section} (Year ${s.yearOfStudy})`, classSections: [] }
-        }
-        grouped[key].classSections.push({ id: s.id, courseId: s.courseId, code: s.courses?.code, name: s.courses?.name, teacherName: s.teacherName || 'Unassigned' })
-      })
+        ; (data.data || []).forEach(s => {
+          const key = `Year ${s.yearOfStudy}-Sec ${s.section}`
+          if (!grouped[key]) {
+            grouped[key] = { id: key, yearOfStudy: s.yearOfStudy, section: s.section, label: `Section ${s.section} (Year ${s.yearOfStudy})`, classSections: [] }
+          }
+          grouped[key].classSections.push({ id: s.id, courseId: s.courseId, code: s.courses?.code, name: s.courses?.name, teacherName: s.teacherName || 'Unassigned' })
+        })
       setCohorts(Object.values(grouped))
       setSelectedCohortId('')
       setGridSchedules([])
     } catch (err) { setError(err.message) } finally { setLoading(false) }
   }
 
+  async function fetchRoutines() {
+    const cohort = cohorts.find(c => c.id === selectedCohortId)
+    if (!cohort) return
+    try {
+      setLoading(true)
+      const data = await apiFetch(`/api/v1/admin/routines?department=${department}&year=${cohort.yearOfStudy}&section=${cohort.section}`)
+      const fetchedRoutines = data.data || []
+      setRoutines(fetchedRoutines)
+
+      const activeRoutine = fetchedRoutines.find(r => r.is_active)
+      if (activeRoutine) {
+        setSelectedRoutineId(activeRoutine.id)
+      } else if (fetchedRoutines.length > 0) {
+        setSelectedRoutineId(fetchedRoutines[0].id)
+      } else {
+        setSelectedRoutineId('')
+        setGridSchedules([])
+      }
+    } catch (err) { setError('Failed to load routines') } finally { setLoading(false) }
+  }
+
   async function fetchSchedules() {
+    // Only return if we have routines but none is selected
+    if (routines.length > 0 && !selectedRoutineId) return
     const cohort = cohorts.find(c => c.id === selectedCohortId)
     if (!cohort || cohort.classSections.length === 0) return
     try {
       setLoading(true)
       const sectionIds = cohort.classSections.map(cs => cs.id).join(',')
-      const data = await apiFetch(`/api/v1/admin/schedules?sectionIds=${sectionIds}`)
+      const url = `/api/v1/admin/schedules?sectionIds=${sectionIds}${selectedRoutineId ? `&routineId=${selectedRoutineId}` : ''}`
+      const data = await apiFetch(url, {
+        cache: false,
+        forceRefresh: true,
+      })
       const formatted = (data.data || []).map(s => {
         const timeParts = s.timeSlot.split('-')
         const startHour = parseInt(timeParts[0].split(':')[0])
         const endHour = timeParts.length > 1 ? parseInt(timeParts[1].split(':')[0]) : startHour + 1
         const sectionInfo = cohort.classSections.find(c => c.id === s.classSectionId) || {}
-        return { tempId: Math.random().toString(36).substr(2, 9), classSectionId: s.classSectionId, courseId: s.courseId, day: s.day, startHour, duration: Math.max(1, endHour - startHour), roomNumber: s.roomNumber, courseCode: s.course?.code, courseName: s.course?.name, teacherName: sectionInfo.teacherName || 'Unknown', isSpecial: false }
+        const isSpecial = SPECIAL_BLOCKS.some(sb => sb.courseId === s.courseId)
+        let specialColor = isSpecial ? SPECIAL_BLOCKS.find(sb => sb.courseId === s.courseId).specialColor : null
+        return { tempId: Math.random().toString(36).substr(2, 9), classSectionId: s.classSectionId, courseId: s.courseId, day: s.day, startHour, duration: Math.max(1, endHour - startHour), roomNumber: s.roomNumber, courseCode: s.course?.code, courseName: s.course?.name, teacherName: sectionInfo.teacherName || (isSpecial ? '—' : 'Unknown'), isSpecial, specialColor }
       })
-      setGridSchedules(formatted)
+
+      // Deduplicate special blocks (they apply to all sections, so backend returns multiple identical blocks)
+      const uniqueFormatted = []
+      formatted.forEach(f => {
+        if (f.isSpecial) {
+          const exists = uniqueFormatted.find(u => u.isSpecial && u.courseId === f.courseId && u.day === f.day && u.startHour === f.startHour)
+          if (!exists) uniqueFormatted.push(f)
+        } else {
+          uniqueFormatted.push(f)
+        }
+      })
+      setGridSchedules(uniqueFormatted)
     } catch (err) { setError('Failed to load existing schedule') } finally { setLoading(false) }
+  }
+
+  async function handleCreateRoutine(copySource = null) {
+    const name = prompt(`Enter a name for the new routine:`)
+    if (!name) return
+    const cohort = cohorts.find(c => c.id === selectedCohortId)
+    if (!cohort) return
+    try {
+      setLoading(true)
+      const payload = {
+        name,
+        department,
+        year: cohort.yearOfStudy,
+        section: cohort.section,
+        sourceRoutineId: copySource
+      }
+      const data = await apiFetch('/api/v1/admin/routines', { method: 'POST', body: JSON.stringify(payload) })
+      await fetchRoutines()
+      setSelectedRoutineId(data.data.id)
+    } catch (err) { setError(err.message) } finally { setLoading(false) }
+  }
+
+  async function handleDeleteRoutine() {
+    if (!selectedRoutineId) return
+    const routine = routines.find(r => r.id === selectedRoutineId)
+    if (!routine) return
+    if (routine.is_active) {
+      setError('Cannot delete the active routine. Please activate another routine first.')
+      return
+    }
+    if (!window.confirm(`Are you sure you want to delete the routine "${routine.name}"? This will permanently delete all its schedule blocks.`)) return
+    
+    try {
+      setLoading(true)
+      await apiFetch(`/api/v1/admin/routines/${selectedRoutineId}`, { method: 'DELETE' })
+      setSuccessMsg('Routine deleted successfully.')
+      setTimeout(() => setSuccessMsg(null), 3000)
+      await fetchRoutines()
+    } catch (err) { setError(err.message) } finally { setLoading(false) }
+  }
+
+  async function handleActivateRoutine() {
+    if (!selectedRoutineId) return
+    try {
+      setLoading(true)
+      await apiFetch(`/api/v1/admin/routines/${selectedRoutineId}/activate`, { method: 'PUT' })
+      setSuccessMsg('Routine is now active for students and teachers!')
+      setTimeout(() => setSuccessMsg(null), 4000)
+      await fetchRoutines()
+    } catch (err) { setError(err.message) } finally { setLoading(false) }
   }
 
   async function handleSave() {
     const cohort = cohorts.find(c => c.id === selectedCohortId)
-    if (!cohort) return
+    if (!cohort || !selectedRoutineId) return
     try {
       setSaving(true); setError(null)
       const sectionIds = cohort.classSections.map(cs => cs.id)
-      const payload = gridSchedules.filter(s => !s.isSpecial && s.classSectionId).map(s => ({
-        class_section_id: s.classSectionId, course_id: s.courseId, day: s.day,
-        time_slot: `${s.startHour}:00-${s.startHour + s.duration}:00`,
-        room_number: s.roomNumber || defaultRoom || 'TBA'
-      }))
-      await apiFetch('/api/v1/admin/schedules/replace', { method: 'PUT', body: JSON.stringify({ sectionIds, schedules: payload }) })
+
+      let payload = []
+      gridSchedules.forEach(s => {
+        if (s.isSpecial) {
+          // Special blocks map to ALL sections in the cohort
+          cohort.classSections.forEach(cs => {
+            payload.push({
+              class_section_id: cs.id, course_id: s.courseId, day: s.day,
+              time_slot: `${s.startHour}:00-${s.startHour + s.duration}:00`,
+              room_number: s.roomNumber || defaultRoom || 'TBA'
+            })
+          })
+        } else if (s.classSectionId) {
+          payload.push({
+            class_section_id: s.classSectionId, course_id: s.courseId, day: s.day,
+            time_slot: `${s.startHour}:00-${s.startHour + s.duration}:00`,
+            room_number: s.roomNumber || defaultRoom || 'TBA'
+          })
+        }
+      })
+
+      await apiFetch('/api/v1/admin/schedules/replace', { method: 'PUT', body: JSON.stringify({ sectionIds, routineId: selectedRoutineId, schedules: payload }) })
+      await fetchSchedules()
       setSuccessMsg('Schedule saved successfully!')
       setTimeout(() => setSuccessMsg(null), 3000)
     } catch (err) { setError(err.message) } finally { setSaving(false) }
@@ -218,42 +335,72 @@ export default function AdminSchedule() {
     <AppLayout title="Schedule Builder">
       <div className="flex flex-col gap-5 w-full max-w-[1500px] mx-auto" style={{ height: 'calc(100vh - 100px)' }}>
 
-        {/* Zone 1: Header */}
-        <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl p-5 flex flex-wrap items-end justify-between gap-4 shrink-0">
-          <div className="flex flex-wrap items-end gap-4 flex-1">
-            <div>
-              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">Department</label>
-              <select value={department} onChange={(e) => setDepartment(e.target.value)} className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm text-gray-900 dark:text-white min-w-[140px] focus:outline-none focus:ring-2 focus:ring-blue-500">
-                <option value="">Select Dept</option>
+        {/* Zone 1: Top Control Bar */}
+        <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl p-3 flex flex-col xl:flex-row gap-4 justify-between items-start xl:items-center shrink-0 shadow-sm">
+          <div className="flex flex-wrap items-center gap-3">
+            <div className="flex flex-col">
+              <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Department</label>
+              <select value={department} onChange={(e) => setDepartment(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm text-gray-900 dark:text-white min-w-[120px] focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="" disabled>Select</option>
                 {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
               </select>
             </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">Cohort</label>
-              <select value={selectedCohortId} onChange={(e) => setSelectedCohortId(e.target.value)} disabled={!department || cohorts.length === 0} className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm text-gray-900 dark:text-white min-w-[200px] focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50">
-                <option value="">Select Cohort</option>
+            <div className="flex flex-col">
+              <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Cohort</label>
+              <select value={selectedCohortId} onChange={(e) => setSelectedCohortId(e.target.value)} disabled={!department || cohorts.length === 0} className="px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm text-gray-900 dark:text-white min-w-[180px] focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50">
+                <option value="" disabled>{department ? (loading ? 'Loading...' : 'Select Cohort') : 'Select Department'}</option>
                 {cohorts.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
               </select>
             </div>
-            <div>
-              <label className="block text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">Default Room</label>
-              <input type="text" placeholder="e.g. ICT304" value={defaultRoom} onChange={(e) => setDefaultRoom(e.target.value)} className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm text-gray-900 dark:text-white min-w-[140px] focus:outline-none focus:ring-2 focus:ring-blue-500" />
+
+            {selectedCohortId && (
+              <div className="flex flex-col">
+                <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Routine</label>
+                <div className="flex items-center gap-2">
+                  <select value={selectedRoutineId} onChange={(e) => setSelectedRoutineId(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm font-medium text-gray-900 dark:text-white min-w-[160px] focus:outline-none focus:ring-2 focus:ring-blue-500">
+                    <option value="" disabled>Select Routine</option>
+                    {routines.map(r => <option key={r.id} value={r.id}>{r.name} {r.is_active ? '(Active)' : ''}</option>)}
+                  </select>
+                  <button onClick={() => handleCreateRoutine(null)} className="px-2.5 py-2 rounded-xl bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs font-medium transition-colors" title="Create Fresh Routine">New</button>
+                  <button onClick={() => handleCreateRoutine(selectedRoutineId)} disabled={!selectedRoutineId} className="px-2.5 py-2 rounded-xl bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs font-medium transition-colors disabled:opacity-50" title="Duplicate Current Routine">Copy</button>
+                  {routines.length === 0 && gridSchedules.length > 0 && (
+                    <button onClick={() => handleCreateRoutine('original')} className="px-2.5 py-2 rounded-xl bg-blue-100 dark:bg-blue-900/40 hover:bg-blue-200 dark:hover:bg-blue-800/60 text-blue-800 dark:text-blue-300 text-xs font-medium transition-colors" title="Copy from Legacy Schedules">Copy Original</button>
+                  )}
+                  {selectedRoutineId && !routines.find(r => r.id === selectedRoutineId)?.is_active && (
+                    <button onClick={handleDeleteRoutine} className="px-2.5 py-2 rounded-xl bg-red-50 dark:bg-red-900/20 hover:bg-red-100 dark:hover:bg-red-900/40 text-red-600 dark:text-red-400 text-xs font-medium transition-colors" title="Delete Routine">Delete</button>
+                  )}
+                </div>
+              </div>
+            )}
+
+            <div className="flex flex-col ml-2">
+              <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Default Room</label>
+              <input type="text" placeholder="e.g. ICT304" value={defaultRoom} onChange={(e) => setDefaultRoom(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm text-gray-900 dark:text-white w-[110px] focus:outline-none focus:ring-2 focus:ring-blue-500" />
             </div>
           </div>
-          <div className="flex items-center gap-3">
-            {error && <span className="text-sm text-red-500">{error}</span>}
-            {successMsg && <span className="text-sm text-green-500 font-medium">{successMsg}</span>}
-            <button onClick={handleSave} disabled={!selectedCohortId || saving || loading} className="px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
+          <div className="flex items-center gap-2">
+            {error && <span className="text-xs text-red-500 max-w-[150px] truncate">{error}</span>}
+            {successMsg && <span className="text-xs text-green-500 font-medium max-w-[150px] truncate">{successMsg}</span>}
+            {selectedRoutineId && (
+              <button
+                onClick={handleActivateRoutine}
+                disabled={routines.find(r => r.id === selectedRoutineId)?.is_active || loading || saving}
+                className={`px-3 py-2 rounded-xl text-xs font-medium transition-colors ${routines.find(r => r.id === selectedRoutineId)?.is_active ? 'bg-green-100 dark:bg-green-900/40 text-green-800 dark:text-green-300 cursor-default' : 'bg-orange-100 dark:bg-orange-900/40 text-orange-800 dark:text-orange-300 hover:bg-orange-200 dark:hover:bg-orange-900/60'}`}
+              >
+                {routines.find(r => r.id === selectedRoutineId)?.is_active ? 'Active Routine' : 'Set as Active'}
+              </button>
+            )}
+            <button onClick={handleSave} disabled={!selectedRoutineId || saving || loading} className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
               {saving ? 'Saving...' : 'Save Schedule'}
             </button>
           </div>
         </div>
 
         {/* Main builder area */}
-        <div className="flex gap-5 flex-1 min-h-0">
+        <div className="flex gap-4 flex-1 min-h-0">
 
           {/* Zone 2: Course Palette */}
-          <div className="w-64 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl flex flex-col shrink-0 overflow-hidden">
+          <div className="w-56 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl flex flex-col shrink-0 overflow-hidden">
             <div className="p-4 border-b border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/30">
               <h3 className="font-semibold text-gray-900 dark:text-white text-sm">Course Palette</h3>
               <p className="text-xs text-gray-500 mt-1">Drag onto the grid</p>
@@ -277,7 +424,7 @@ export default function AdminSchedule() {
                   </div>
                   <div className="text-[10px] opacity-90 mt-0.5 leading-tight line-clamp-1">{item.name}</div>
                   {item.teacherName && <div className="text-[10px] mt-1 opacity-70 flex items-center gap-1">
-                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2"/><circle cx="12" cy="7" r="4"/></svg>
+                    <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-3 h-3"><path d="M19 21v-2a4 4 0 0 0-4-4H9a4 4 0 0 0-4 4v2" /><circle cx="12" cy="7" r="4" /></svg>
                     {item.teacherName}
                   </div>}
                 </div>
@@ -383,11 +530,6 @@ export default function AdminSchedule() {
               ))}
             </div>
           </div>
-        </div>
-
-        {/* Footer note */}
-        <div className="text-xs text-gray-400 text-center shrink-0 pb-2">
-          Library, Remedial & Lunch Break blocks are for visual planning — only assigned courses are saved to the database.
         </div>
       </div>
     </AppLayout>

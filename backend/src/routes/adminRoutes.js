@@ -1,6 +1,21 @@
 import { Router } from 'express'
+import { supabaseAdmin } from '../lib/supabase.js'
 
 const router = Router()
+
+// ─── HELPERS ──────────────────────────────────────────────────────────────────
+function normalizeYear(value) {
+  if (value == null) return null
+  const raw = String(value).trim().toLowerCase()
+  const numeric = parseInt(raw, 10)
+  if (!Number.isNaN(numeric)) return numeric
+  if (raw.startsWith('1')) return 1
+  if (raw.startsWith('2')) return 2
+  if (raw.startsWith('3')) return 3
+  if (raw.startsWith('4')) return 4
+  return null
+}
+
 
 /**
  * GET /api/v1/admin/stats
@@ -787,13 +802,207 @@ router.get('/departments/:department/sections', async (req, res) => {
 })
 
 /**
+ * GET /api/v1/admin/routines
+ * Fetch routines for a cohort
+ * Query: ?department=...&year=...&section=...
+ */
+router.get('/routines', async (req, res) => {
+  try {
+    const { department, year, section } = req.query
+    const supabase = req.supabase
+    const db = supabaseAdmin || supabase
+    const numYear = normalizeYear(year)
+
+    if (!department || numYear === null || !section) {
+      return res.status(400).json({ error: 'department, year, and section are required' })
+    }
+
+    const { data, error } = await db
+      .from('class_routines')
+      .select('*')
+      .eq('department', department)
+      .eq('year_of_study', numYear)
+      .eq('section', section)
+      .order('created_at', { ascending: false })
+
+    if (error) return res.status(500).json({ error: error.message })
+    return res.json({ data })
+  } catch (err) {
+    console.error('GET /admin/routines error:', err)
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+/**
+ * POST /api/v1/admin/routines
+ * Create a new routine (optionally duplicating another)
+ * Body: { name, department, year, section, sourceRoutineId }
+ */
+router.post('/routines', async (req, res) => {
+  try {
+    const { name, department, year, section, sourceRoutineId } = req.body
+    const supabase = req.supabase
+    const db = supabaseAdmin || supabase
+    const numYear = normalizeYear(year)
+
+    if (!name || !department || numYear === null || !section) {
+      return res.status(400).json({ error: 'Missing required fields' })
+    }
+
+    // Determine if this is the first routine for the cohort (make it active if so)
+    const { count } = await db
+      .from('class_routines')
+      .select('id', { count: 'exact', head: true })
+      .eq('department', department)
+      .eq('year_of_study', numYear)
+      .eq('section', section)
+
+    const isFirst = count === 0
+
+    // Insert new routine
+    const { data: newRoutine, error: insertError } = await db
+      .from('class_routines')
+      .insert({
+        name,
+        department,
+        year_of_study: numYear,
+        section,
+        is_active: isFirst
+      })
+      .select()
+      .single()
+
+    if (insertError) return res.status(400).json({ error: insertError.message })
+
+    // Duplicate schedules if requested
+    if (sourceRoutineId) {
+      let oldSchedulesQuery = db.from('class_schedules').select('*')
+      
+      if (sourceRoutineId === 'original') {
+        const { data: sections } = await db
+          .from('class_sections')
+          .select('id')
+          .eq('department', department)
+          .eq('year_of_study', numYear)
+          .eq('section', section)
+          
+        if (sections && sections.length > 0) {
+          const secIds = sections.map(s => s.id)
+          oldSchedulesQuery = oldSchedulesQuery.is('routine_id', null).in('class_section_id', secIds)
+        } else {
+          oldSchedulesQuery = oldSchedulesQuery.eq('id', '00000000-0000-0000-0000-000000000000') // Force empty
+        }
+      } else {
+        oldSchedulesQuery = oldSchedulesQuery.eq('routine_id', sourceRoutineId)
+      }
+
+      const { data: oldSchedules } = await oldSchedulesQuery
+
+      if (oldSchedules && oldSchedules.length > 0) {
+        const newSchedules = oldSchedules.map(s => {
+          const { id, created_at, updated_at, routine_id, ...rest } = s
+          return { ...rest, routine_id: newRoutine.id }
+        })
+        await db.from('class_schedules').insert(newSchedules)
+      }
+    }
+
+    return res.status(201).json({ data: newRoutine })
+  } catch (err) {
+    console.error('POST /admin/routines error:', err)
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+/**
+ * PUT /api/v1/admin/routines/:id/activate
+ * Set a routine as active
+ */
+router.put('/routines/:id/activate', async (req, res) => {
+  try {
+    const { id } = req.params
+    const supabase = req.supabase
+    const db = supabaseAdmin || supabase
+
+    // Get the routine to find its cohort
+    const { data: routine } = await db
+      .from('class_routines')
+      .select('department, year_of_study, section')
+      .eq('id', id)
+      .single()
+
+    if (!routine) return res.status(404).json({ error: 'Routine not found' })
+
+    // Deactivate all others in the same cohort
+    await db
+      .from('class_routines')
+      .update({ is_active: false })
+      .eq('department', routine.department)
+      .eq('year_of_study', routine.year_of_study)
+      .eq('section', routine.section)
+
+    // Activate the chosen one
+    const { data, error } = await db
+      .from('class_routines')
+      .update({ is_active: true })
+      .eq('id', id)
+      .select()
+      .single()
+
+    if (error) return res.status(400).json({ error: error.message })
+
+    return res.json({ data, success: true })
+  } catch (err) {
+    console.error('PUT /admin/routines/activate error:', err)
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+/**
+ * DELETE /api/v1/admin/routines/:id
+ * Delete a routine and its schedules
+ */
+router.delete('/routines/:id', async (req, res) => {
+  try {
+    const { id } = req.params
+    const supabase = req.supabase
+    const db = supabaseAdmin || supabase
+
+    // Prevent deleting the active routine
+    const { data: routine } = await db
+      .from('class_routines')
+      .select('is_active')
+      .eq('id', id)
+      .single()
+
+    if (!routine) return res.status(404).json({ error: 'Routine not found' })
+    if (routine.is_active) {
+      return res.status(400).json({ error: 'Cannot delete the active routine. Please activate another routine first.' })
+    }
+
+    // Delete schedules tied to this routine
+    await db.from('class_schedules').delete().eq('routine_id', id)
+
+    // Delete the routine itself
+    const { error } = await db.from('class_routines').delete().eq('id', id)
+
+    if (error) return res.status(400).json({ error: error.message })
+
+    return res.json({ success: true })
+  } catch (err) {
+    console.error('DELETE /admin/routines/:id error:', err)
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+/**
  * GET /api/v1/admin/schedules
  * Get schedules for class sections
- * Query: ?sectionIds=1,2,3 or ?sectionId=1
+ * Query: ?sectionIds=1,2,3 or ?sectionId=1 & routineId=xxx
  */
 router.get('/schedules', async (req, res) => {
   try {
-    const { sectionId, sectionIds } = req.query
+    const { sectionId, sectionIds, routineId } = req.query
     const supabase = req.supabase
 
     if (!sectionId && !sectionIds) {
@@ -802,7 +1011,7 @@ router.get('/schedules', async (req, res) => {
 
     const ids = sectionIds ? sectionIds.split(',') : [sectionId]
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('class_schedules')
       .select(`
         id,
@@ -810,11 +1019,18 @@ router.get('/schedules', async (req, res) => {
         time_slot,
         room_number,
         class_section_id,
+        routine_id,
         course_id,
         courses (id, code, name)
       `)
       .in('class_section_id', ids)
       .order('day')
+      
+    if (routineId) {
+      query = query.eq('routine_id', routineId)
+    }
+
+    const { data, error } = await query
 
     if (error) {
       return res.status(500).json({ error: error.message })
@@ -826,6 +1042,7 @@ router.get('/schedules', async (req, res) => {
       timeSlot: s.time_slot,
       roomNumber: s.room_number,
       classSectionId: s.class_section_id,
+      routineId: s.routine_id,
       courseId: s.course_id,
       course: s.courses,
     }))
@@ -930,23 +1147,24 @@ router.delete('/schedules/:id', async (req, res) => {
 /**
  * PUT /api/v1/admin/schedules/replace
  * Replace schedules for multiple class sections
- * Body: { sectionIds: [...], schedules: [{class_section_id, course_id, day, time_slot, room_number}] }
+ * Body: { sectionIds: [...], routineId: '...', schedules: [{class_section_id, course_id, day, time_slot, room_number}] }
  */
 router.put('/schedules/replace', async (req, res) => {
   try {
-    const { sectionIds, schedules } = req.body
+    const { sectionIds, routineId, schedules } = req.body
     const supabase = req.supabase
 
-    if (!sectionIds || !Array.isArray(sectionIds) || !schedules || !Array.isArray(schedules)) {
-      return res.status(400).json({ error: 'sectionIds and schedules arrays are required' })
+    if (!sectionIds || !Array.isArray(sectionIds) || !schedules || !Array.isArray(schedules) || !routineId) {
+      return res.status(400).json({ error: 'sectionIds, routineId, and schedules arrays are required' })
     }
 
     if (sectionIds.length > 0) {
-      // 1. Delete existing schedules for these sections
+      // 1. Delete existing schedules for these sections AND this routine
       const { error: deleteError } = await supabase
         .from('class_schedules')
         .delete()
         .in('class_section_id', sectionIds)
+        .eq('routine_id', routineId)
 
       if (deleteError) {
         return res.status(400).json({ error: deleteError.message })
@@ -955,9 +1173,13 @@ router.put('/schedules/replace', async (req, res) => {
 
     // 2. Insert new schedules
     if (schedules.length > 0) {
+      const payload = schedules.map(s => ({
+        ...s,
+        routine_id: routineId
+      }))
       const { data, error: insertError } = await supabase
         .from('class_schedules')
-        .insert(schedules)
+        .insert(payload)
         .select()
 
       if (insertError) {

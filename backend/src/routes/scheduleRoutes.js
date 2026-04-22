@@ -92,6 +92,7 @@ function normalizeSchedule(s) {
     courseId: s.course_id,
     course_id: s.course_id,
     class_sections: s.class_sections || null,
+    courses: s.courses || null,
   }
 }
 
@@ -106,6 +107,8 @@ async function getCohortSchedulesDirect(supabase, studentProfile) {
     .from('class_schedules')
     .select(`
       *,
+      class_routines!inner(is_active),
+      courses (name, code),
       class_sections!inner (
         section,
         year_of_study,
@@ -114,6 +117,7 @@ async function getCohortSchedulesDirect(supabase, studentProfile) {
         teacher_assignments(teacher_profiles(profiles(full_name)))
       )
     `)
+    .eq('class_routines.is_active', true)
     .order('day', { ascending: true })
 
   if (error) {
@@ -151,9 +155,11 @@ async function getCourseScopedSchedulesFallback(supabase, studentProfile) {
       room_number,
       class_section_id,
       course_id,
+      class_routines!inner(is_active),
       courses!inner (id, code, name, department, semester),
       class_sections (section, teacher_assignments(teacher_profiles(profiles(full_name))))
     `)
+    .eq('class_routines.is_active', true)
     .order('day', { ascending: true })
 
   if (studentSemester) {
@@ -343,8 +349,9 @@ router.get('/student', async (req, res) => {
     if (sectionIds.length > 0) {
       const result = await db
         .from('class_schedules')
-        .select('*, class_sections (section, year_of_study, department, courses (name, code, semester), teacher_assignments(teacher_profiles(profiles(full_name))))')
+        .select('*, class_routines!inner(is_active), courses (name, code), class_sections (section, year_of_study, department, courses (name, code, semester), teacher_assignments(teacher_profiles(profiles(full_name))))')
         .in('class_section_id', sectionIds)
+        .eq('class_routines.is_active', true)
         .order('day', { ascending: true })
       classSchedules = result.data || []
       error = result.error || null
@@ -451,8 +458,9 @@ router.get('/teacher', async (req, res) => {
     const ids = asgn.map(a => a.class_section_id)
     const { data, error } = await req.supabase
       .from('class_schedules')
-      .select('*, class_sections (section, courses (name, code), teacher_assignments(teacher_profiles(profiles(full_name))))')
+      .select('*, class_routines!inner(is_active), class_sections (section, courses (name, code), teacher_assignments(teacher_profiles(profiles(full_name))))')
       .in('class_section_id', ids)
+      .eq('class_routines.is_active', true)
       .order('day', { ascending: true })
     if (error) return res.status(400).json({ error: error.message })
     const normalized = (data || []).map(normalizeSchedule)
@@ -473,7 +481,7 @@ router.get('/today', async (req, res) => {
         const { data: asgn } = await req.supabase.from('teacher_assignments').select('class_section_id').eq('teacher_id', tp.id)
         if (asgn?.length) {
           const ids = asgn.map(a => a.class_section_id)
-          const { data } = await req.supabase.from('class_schedules').select('*, class_sections (section, courses (name, code), teacher_assignments(teacher_profiles(profiles(full_name))))').in('class_section_id', ids).order('day', { ascending: true })
+          const { data } = await req.supabase.from('class_schedules').select('*, class_routines!inner(is_active), class_sections (section, courses (name, code), teacher_assignments(teacher_profiles(profiles(full_name))))').in('class_section_id', ids).eq('class_routines.is_active', true).order('day', { ascending: true })
           allData = (data || []).map(normalizeSchedule)
         }
       }
@@ -517,8 +525,9 @@ router.get('/today', async (req, res) => {
         if (ids.length) {
           const { data } = await db
             .from('class_schedules')
-            .select('*, class_sections (section, courses (name, code), teacher_assignments(teacher_profiles(profiles(full_name))))')
+            .select('*, class_routines!inner(is_active), class_sections (section, courses (name, code), teacher_assignments(teacher_profiles(profiles(full_name))))')
             .in('class_section_id', ids)
+            .eq('class_routines.is_active', true)
             .order('day', { ascending: true })
           allData = (data || []).map(normalizeSchedule)
         }
