@@ -26,3 +26,15 @@ dist-ssr
 # Environment files
 .env
 backend/.env
+# Python virtual environment
+venv/
+.venv/
+
+# Graphify output
+graphify-out/
+
+# Optional (recommended)
+__pycache__/
+*.pyc
+
+.agent/

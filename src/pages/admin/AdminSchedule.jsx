@@ -84,7 +84,10 @@ export default function AdminSchedule() {
     try {
       setLoading(true)
       const sectionIds = cohort.classSections.map(cs => cs.id).join(',')
-      const data = await apiFetch(`/api/v1/admin/schedules?sectionIds=${sectionIds}`)
+      const data = await apiFetch(`/api/v1/admin/schedules?sectionIds=${sectionIds}`, {
+        cache: false,
+        forceRefresh: true,
+      })
       const formatted = (data.data || []).map(s => {
         const timeParts = s.timeSlot.split('-')
         const startHour = parseInt(timeParts[0].split(':')[0])
@@ -108,6 +111,7 @@ export default function AdminSchedule() {
         room_number: s.roomNumber || defaultRoom || 'TBA'
       }))
       await apiFetch('/api/v1/admin/schedules/replace', { method: 'PUT', body: JSON.stringify({ sectionIds, schedules: payload }) })
+      await fetchSchedules()
       setSuccessMsg('Schedule saved successfully!')
       setTimeout(() => setSuccessMsg(null), 3000)
     } catch (err) { setError(err.message) } finally { setSaving(false) }

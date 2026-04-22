@@ -2,6 +2,18 @@ import { Router } from 'express'
 
 const router = Router()
 
+function normalizeDepartment(value) {
+  if (!value) return ''
+  const compact = String(value).trim().toUpperCase().replace(/[^A-Z]/g, '')
+  if (compact === 'CSE' || compact.includes('COMPUTERSCIENCE')) return 'CSE'
+  if (compact === 'IT' || compact.includes('INFORMATIONTECHNOLOGY')) return 'IT'
+  if (compact === 'ECE' || compact.includes('ELECTRONICS') || compact.includes('COMMUNICATION')) return 'ECE'
+  if (compact === 'EE' || compact.includes('ELECTRICAL')) return 'EE'
+  if (compact === 'ME' || compact.includes('MECHANICAL')) return 'ME'
+  if (compact === 'CE' || compact.includes('CIVIL')) return 'CE'
+  return compact
+}
+
 /**
  * GET /api/v1/admin/stats
  * Get overall system statistics
@@ -787,6 +799,65 @@ router.get('/departments/:department/sections', async (req, res) => {
 })
 
 /**
+ * GET /api/v1/admin/departments/summary
+ * Get per-department counts for students, teachers, and courses
+ */
+router.get('/departments/summary', async (req, res) => {
+  try {
+    const supabase = req.supabase
+
+    const [studentsResult, teachersResult, coursesResult] = await Promise.all([
+      supabase.from('student_profiles').select('department'),
+      supabase.from('teacher_profiles').select('department'),
+      supabase.from('courses').select('department'),
+    ])
+
+    if (studentsResult.error || teachersResult.error || coursesResult.error) {
+      return res.status(500).json({
+        error: studentsResult.error?.message || teachersResult.error?.message || coursesResult.error?.message || 'Failed to fetch department summary',
+      })
+    }
+
+    const summaryMap = {}
+    const ensureDepartment = (code) => {
+      if (!code) return null
+      if (!summaryMap[code]) {
+        summaryMap[code] = {
+          code,
+          students: 0,
+          teachers: 0,
+          courses: 0,
+        }
+      }
+      return summaryMap[code]
+    }
+
+    for (const row of studentsResult.data || []) {
+      const code = normalizeDepartment(row.department)
+      const item = ensureDepartment(code)
+      if (item) item.students += 1
+    }
+
+    for (const row of teachersResult.data || []) {
+      const code = normalizeDepartment(row.department)
+      const item = ensureDepartment(code)
+      if (item) item.teachers += 1
+    }
+
+    for (const row of coursesResult.data || []) {
+      const code = normalizeDepartment(row.department)
+      const item = ensureDepartment(code)
+      if (item) item.courses += 1
+    }
+
+    return res.json({ data: Object.values(summaryMap) })
+  } catch (err) {
+    console.error('GET /admin/departments/summary error:', err)
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+/**
  * GET /api/v1/admin/schedules
  * Get schedules for class sections
  * Query: ?sectionIds=1,2,3 or ?sectionId=1
@@ -1151,37 +1222,51 @@ router.get('/departments/:code/teachers', async (req, res) => {
   try {
     const { code } = req.params
     const supabase = req.supabase
+    const normalizedCode = normalizeDepartment(code)
 
-    const { data, error } = await supabase
-      .from('profiles')
-      .select(`
-        id,
-        email,
-        full_name,
-        college_name,
-        created_at,
-        teacher_profiles (id, employee_id, department)
-      `)
-      .eq('role', 'teacher')
+    const { data: teacherProfiles, error } = await supabase
+      .from('teacher_profiles')
+      .select('id, profile_id, employee_id, department')
 
     if (error) {
       return res.status(500).json({ error: error.message })
     }
 
-    // Filter by department on the backend
-    const filtered = (data || []).filter(
-      (teacher) => teacher.teacher_profiles?.[0]?.department === code.toUpperCase()
+    const filteredProfiles = (teacherProfiles || []).filter(
+      (tp) => normalizeDepartment(tp.department) === normalizedCode
     )
 
-    const enriched = filtered.map((teacher) => ({
-      id: teacher.id,
-      fullName: teacher.full_name,
-      email: teacher.email,
-      employeeId: teacher.teacher_profiles?.[0]?.employee_id || 'N/A',
-      department: teacher.teacher_profiles?.[0]?.department,
-      collegeName: teacher.college_name,
-      createdAt: teacher.created_at,
-    }))
+    const profileIds = filteredProfiles
+      .map((tp) => tp.profile_id)
+      .filter(Boolean)
+
+    let profileMap = {}
+    if (profileIds.length > 0) {
+      const { data: profileRows, error: profileError } = await supabase
+        .from('profiles')
+        .select('id, email, full_name, college_name, created_at')
+        .in('id', profileIds)
+        .eq('role', 'teacher')
+
+      if (profileError) {
+        return res.status(500).json({ error: profileError.message })
+      }
+
+      profileMap = Object.fromEntries((profileRows || []).map((p) => [p.id, p]))
+    }
+
+    const enriched = filteredProfiles.map((tp) => {
+      const profile = profileMap[tp.profile_id] || null
+      return {
+        id: profile?.id || tp.profile_id || tp.id,
+        fullName: profile?.full_name || 'Unnamed Teacher',
+        email: profile?.email || null,
+        employeeId: tp.employee_id || 'N/A',
+        department: tp.department,
+        collegeName: profile?.college_name || null,
+        createdAt: profile?.created_at || null,
+      }
+    })
 
     return res.json({ data: enriched })
   } catch (err) {
@@ -1198,48 +1283,58 @@ router.get('/departments/:code/students', async (req, res) => {
   try {
     const { code } = req.params
     const supabase = req.supabase
+    const normalizedCode = normalizeDepartment(code)
 
-    const { data, error } = await supabase
-      .from('profiles')
-      .select(`
-        id,
-        email,
-        full_name,
-        college_name,
-        created_at,
-        student_profiles (id, roll_number, department, year_of_study)
-      `)
-      .eq('role', 'student')
+    const { data: studentProfiles, error } = await supabase
+      .from('student_profiles')
+      .select('id, profile_id, roll_number, department, year_of_study')
 
     if (error) {
       return res.status(500).json({ error: error.message })
     }
 
+    const filteredProfiles = (studentProfiles || []).filter(
+      (sp) => normalizeDepartment(sp.department) === normalizedCode
+    )
+
+    const profileIds = filteredProfiles
+      .map((sp) => sp.profile_id)
+      .filter(Boolean)
+
+    let profileMap = {}
+    if (profileIds.length > 0) {
+      const { data: profileRows, error: profileError } = await supabase
+        .from('profiles')
+        .select('id, email, full_name, college_name, created_at')
+        .in('id', profileIds)
+        .eq('role', 'student')
+
+      if (profileError) {
+        return res.status(500).json({ error: profileError.message })
+      }
+
+      profileMap = Object.fromEntries((profileRows || []).map((p) => [p.id, p]))
+    }
+
     // Filter by department and group students by year of study
     const groupedByYear = {}
-      ; (data || []).forEach((student) => {
-        const studentProfile = student.student_profiles?.[0]
-
-        // Only include students from the requested department
-        if (studentProfile?.department !== code.toUpperCase()) {
-          return
-        }
-
-        const yearOfStudy = studentProfile?.year_of_study || 'Unknown'
+      ; (filteredProfiles || []).forEach((sp) => {
+        const yearOfStudy = sp.year_of_study || 'Unknown'
+        const profile = profileMap[sp.profile_id] || null
 
         if (!groupedByYear[yearOfStudy]) {
           groupedByYear[yearOfStudy] = []
         }
 
         groupedByYear[yearOfStudy].push({
-          id: student.id,
-          fullName: student.full_name,
-          email: student.email,
-          rollNumber: studentProfile?.roll_number || 'N/A',
-          department: studentProfile?.department,
+          id: profile?.id || sp.profile_id || sp.id,
+          fullName: profile?.full_name || 'Unnamed Student',
+          email: profile?.email || null,
+          rollNumber: sp.roll_number || 'N/A',
+          department: sp.department,
           yearOfStudy: yearOfStudy,
-          collegeName: student.college_name,
-          createdAt: student.created_at,
+          collegeName: profile?.college_name || null,
+          createdAt: profile?.created_at || null,
         })
       })
 

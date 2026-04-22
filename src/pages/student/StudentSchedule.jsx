@@ -66,7 +66,10 @@ export default function StudentSchedule() {
     try {
       setError(null);
       const [data, profileRes] = await Promise.all([
-        apiFetch('/api/v1/schedule/student'),
+        apiFetch('/api/v1/schedule/student', {
+          cache: false,
+          forceRefresh: true,
+        }),
         getMyStudentProfile(),
       ]);
 

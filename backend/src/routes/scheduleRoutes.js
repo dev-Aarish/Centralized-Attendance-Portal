@@ -72,6 +72,11 @@ function normalizeDepartment(value) {
   return compact
 }
 
+function normalizeSection(value) {
+  if (!value) return ''
+  return String(value).trim().toUpperCase()
+}
+
 /**
  * Normalize a class_schedule row into a consistent camelCase format
  * for the frontend to consume reliably.
@@ -100,6 +105,7 @@ async function getCohortSchedulesDirect(supabase, studentProfile) {
   const studentYear = normalizeYear(studentProfile.year_of_study) ?? toYearFromSemester(studentProfile.current_semester)
   const studentSemester = studentProfile.current_semester ? parseInt(studentProfile.current_semester, 10) : null
   const studentDepartment = normalizeDepartment(studentProfile.department)
+  const studentSection = normalizeSection(studentProfile.section)
 
   const { data: rows, error } = await supabase
     .from('class_schedules')
@@ -129,7 +135,8 @@ async function getCohortSchedulesDirect(supabase, studentProfile) {
 
     const departmentMatch = !studentDepartment || !sectionDepartment || sectionDepartment === studentDepartment
     const cohortMatch = matchesStudentCohort(studentYear, studentSemester, sectionYear, sectionSemester)
-    const sectionMatch = !studentProfile.section || !row.class_sections?.section || row.class_sections.section === studentProfile.section
+    const sectionValue = normalizeSection(row.class_sections?.section)
+    const sectionMatch = !studentSection || !sectionValue || sectionValue === studentSection
     return departmentMatch && cohortMatch && sectionMatch
   })
 }
@@ -229,6 +236,7 @@ router.get('/student', async (req, res) => {
     // department + year + optional section + current semester.
     if (sp.department) {
       const studentDepartment = normalizeDepartment(sp.department)
+      const studentSection = normalizeSection(sp.section)
 
       let query = req.supabase
         .from('class_sections')
@@ -277,9 +285,12 @@ router.get('/student', async (req, res) => {
           const sectionDepartment = normalizeDepartment(c.department)
           const sectionYear = normalizeYear(c.year_of_study)
           const sectionSemester = c.courses?.semester ? parseInt(c.courses.semester, 10) : null
+          const sectionValue = normalizeSection(c.section)
 
           const departmentMatch = !studentDepartment || !sectionDepartment || sectionDepartment === studentDepartment
-          return departmentMatch && matchesStudentCohort(studentYear, studentSemester, sectionYear, sectionSemester)
+          const cohortMatch = matchesStudentCohort(studentYear, studentSemester, sectionYear, sectionSemester)
+          const sectionMatch = !studentSection || !sectionValue || sectionValue === studentSection
+          return departmentMatch && cohortMatch && sectionMatch
         })
 
       // Second-pass fallback without section constraint if still empty.
@@ -298,9 +309,22 @@ router.get('/student', async (req, res) => {
           const sectionDepartment = normalizeDepartment(c.department)
           const sectionYear = normalizeYear(c.year_of_study)
           const sectionSemester = c.courses?.semester ? parseInt(c.courses.semester, 10) : null
+          const sectionValue = normalizeSection(c.section)
           const departmentMatch = !studentDepartment || !sectionDepartment || sectionDepartment === studentDepartment
-          return departmentMatch && matchesStudentCohort(studentYear, studentSemester, sectionYear, sectionSemester)
+          const cohortMatch = matchesStudentCohort(studentYear, studentSemester, sectionYear, sectionSemester)
+          const sectionMatch = !studentSection || !sectionValue || sectionValue === studentSection
+          return departmentMatch && cohortMatch && sectionMatch
         })
+
+        if (matchedSections.length === 0) {
+          matchedSections = (deptWide.data || []).filter((c) => {
+            const sectionDepartment = normalizeDepartment(c.department)
+            const sectionYear = normalizeYear(c.year_of_study)
+            const sectionSemester = c.courses?.semester ? parseInt(c.courses.semester, 10) : null
+            const departmentMatch = !studentDepartment || !sectionDepartment || sectionDepartment === studentDepartment
+            return departmentMatch && matchesStudentCohort(studentYear, studentSemester, sectionYear, sectionSemester)
+          })
+        }
       }
 
       const matchedIds = matchedSections.map((s) => s.id)
@@ -449,6 +473,7 @@ router.get('/today', async (req, res) => {
 
         if (sp.department) {
           const studentDepartment = normalizeDepartment(sp.department)
+          const studentSection = normalizeSection(sp.section)
           const studentYear = normalizeYear(sp.year_of_study) ?? toYearFromSemester(sp.current_semester)
           const studentSemester = sp.current_semester ? parseInt(sp.current_semester, 10) : null
 
@@ -460,8 +485,11 @@ router.get('/today', async (req, res) => {
             const sectionDepartment = normalizeDepartment(c.department)
             const sectionYear = normalizeYear(c.year_of_study)
             const sectionSemester = c.courses?.semester ? parseInt(c.courses.semester, 10) : null
+            const sectionValue = normalizeSection(c.section)
             const departmentMatch = !studentDepartment || !sectionDepartment || sectionDepartment === studentDepartment
-            if (departmentMatch && matchesStudentCohort(studentYear, studentSemester, sectionYear, sectionSemester)) {
+            const cohortMatch = matchesStudentCohort(studentYear, studentSemester, sectionYear, sectionSemester)
+            const sectionMatch = !studentSection || !sectionValue || sectionValue === studentSection
+            if (departmentMatch && cohortMatch && sectionMatch) {
               idSet.add(c.id)
             }
           })

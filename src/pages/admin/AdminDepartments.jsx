@@ -13,6 +13,7 @@ const DEPARTMENTS = [
 
 export default function AdminDepartments() {
  const [stats, setStats] = useState(null)
+ const [departmentSummary, setDepartmentSummary] = useState({})
  const [loading, setLoading] = useState(true)
  const [error, setError] = useState(null)
  const [selectedDept, setSelectedDept] = useState(null)
@@ -27,8 +28,22 @@ export default function AdminDepartments() {
  async function fetchStats() {
   try {
    setLoading(true)
-   const data = await apiFetch('/api/v1/admin/stats')
-   setStats(data.data)
+   const [statsRes, summaryRes] = await Promise.all([
+    apiFetch('/api/v1/admin/stats'),
+    apiFetch('/api/v1/admin/departments/summary'),
+   ])
+
+   setStats(statsRes.data)
+   const summaryMap = {}
+   for (const item of summaryRes.data || []) {
+    if (!item?.code) continue
+    summaryMap[item.code] = {
+     students: item.students || 0,
+     teachers: item.teachers || 0,
+     courses: item.courses || 0,
+    }
+   }
+   setDepartmentSummary(summaryMap)
   } catch (err) {
    setError(err.message)
    console.error('Error fetching stats:', err)
@@ -42,7 +57,10 @@ export default function AdminDepartments() {
    setViewType('teachers')
    setDetailsLoading(true)
    setDetailsData([])
-   const data = await apiFetch(`/api/v1/admin/departments/${deptCode}/teachers`)
+   const data = await apiFetch(`/api/v1/admin/departments/${deptCode}/teachers`, {
+    cache: false,
+    forceRefresh: true,
+   })
    setDetailsData(data.data || [])
   } catch (err) {
    setError(err.message)
@@ -58,7 +76,10 @@ export default function AdminDepartments() {
    setViewType('students')
    setDetailsLoading(true)
    setDetailsData({})
-   const data = await apiFetch(`/api/v1/admin/departments/${deptCode}/students`)
+   const data = await apiFetch(`/api/v1/admin/departments/${deptCode}/students`, {
+    cache: false,
+    forceRefresh: true,
+   })
    setDetailsData(data.data || {})
   } catch (err) {
    setError(err.message)
@@ -107,40 +128,57 @@ return (
     )}
 
     <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-     {DEPARTMENTS.map((dept) => (
-      <div
-       key={dept.code}
-       className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl px-5 py-4"
-      >
-       <div className="flex items-start justify-between">
-        <div>
-         <p className="text-lg font-semibold text-gray-900 dark:text-white">{dept.code}</p>
-         <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">{dept.name}</p>
-        </div>
-        <span className="text-2xl font-bold text-blue-500"></span>
-       </div>
-       <div className="grid grid-cols-3 gap-3 mt-4 pt-4 border-t border-gray-100 dark:border-gray-800 text-center text-xs">
-        <div>
-         <p className="font-bold text-gray-900 dark:text-white">—</p>
-         <p className="text-gray-400 dark:text-gray-500">Students</p>
-        </div>
-        <div>
-         <p className="font-bold text-gray-900 dark:text-white">—</p>
-         <p className="text-gray-400 dark:text-gray-500">Teachers</p>
-        </div>
-        <div>
-         <p className="font-bold text-gray-900 dark:text-white">—</p>
-         <p className="text-gray-400 dark:text-gray-500">Courses</p>
-        </div>
-       </div>
-       <button
-        onClick={() => handleViewDetails(dept)}
-        className="w-full mt-4 px-3 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white text-xs font-medium transition-colors"
-       >
-        View Details
-       </button>
-      </div>
-     ))}
+     {DEPARTMENTS.map((dept) => {
+        const deptCounts =
+            departmentSummary[dept.code] || { students: 0, teachers: 0, courses: 0 }
+
+        return (
+            <div
+            key={dept.code}
+            className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl px-5 py-4"
+            >
+            <div className="flex items-start justify-between">
+                <div>
+                <p className="text-lg font-semibold text-gray-900 dark:text-white">
+                    {dept.code}
+                </p>
+                <p className="text-xs text-gray-400 dark:text-gray-500 mt-1">
+                    {dept.name}
+                </p>
+                </div>
+                <span className="text-2xl font-bold text-blue-500"></span>
+            </div>
+
+            <div className="grid grid-cols-3 gap-3 mt-4 pt-4 border-t border-gray-100 dark:border-gray-800 text-center text-xs">
+                <div>
+                <p className="font-bold text-gray-900 dark:text-white">
+                    {deptCounts.students}
+                </p>
+                <p className="text-gray-400 dark:text-gray-500">Students</p>
+                </div>
+                <div>
+                <p className="font-bold text-gray-900 dark:text-white">
+                    {deptCounts.teachers}
+                </p>
+                <p className="text-gray-400 dark:text-gray-500">Teachers</p>
+                </div>
+                <div>
+                <p className="font-bold text-gray-900 dark:text-white">
+                    {deptCounts.courses}
+                </p>
+                <p className="text-gray-400 dark:text-gray-500">Courses</p>
+                </div>
+            </div>
+
+            <button
+                onClick={() => handleViewDetails(dept)}
+                className="w-full mt-4 px-3 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white text-xs font-medium transition-colors"
+            >
+                View Details
+            </button>
+            </div>
+        )
+        })}
     </div>
 
     {/* Overall Stats */}

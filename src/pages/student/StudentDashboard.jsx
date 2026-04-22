@@ -50,16 +50,35 @@ export default function StudentDashboard() {
 
         const lectureSummary = lectureRes.data ?? []
         const labSummary = labRes.data ?? []
-        const hasAttendanceSummary = lectureSummary.length > 0 || labSummary.length > 0
+        const scheduleItems = scheduleRes.data ?? []
 
-        if (hasAttendanceSummary) {
+        // Always build the base lists from the schedule.
+        // This ensures all courses are shown and properly categorized into lecture/lab.
+        const baseFromSchedule = buildZeroAttendanceFromSchedule(scheduleItems)
+
+        // Convert attendance summaries into maps for quick lookup
+        const lectureMap = new Map(lectureSummary.map(s => [s.code, s.percentage]))
+        const labMap = new Map(labSummary.map(s => [s.code, s.percentage]))
+
+        // Merge actual percentages into the base schedule items
+        const finalLectureData = baseFromSchedule.lecture.map(subject => ({
+          ...subject,
+          percentage: lectureMap.has(subject.code) ? lectureMap.get(subject.code) : 0
+        }))
+
+        const finalLabData = baseFromSchedule.lab.map(subject => ({
+          ...subject,
+          percentage: labMap.has(subject.code) ? labMap.get(subject.code) : 0
+        }))
+
+        // Schedule is the source of truth for what courses belong to this student.
+        // Only fall back to attendance summaries when schedule data is unavailable.
+        if (scheduleItems.length > 0) {
+          setLectureData(finalLectureData)
+          setLabData(finalLabData)
+        } else {
           setLectureData(lectureSummary)
           setLabData(labSummary)
-        } else {
-          const scheduleItems = scheduleRes.data ?? []
-          const fallback = buildZeroAttendanceFromSchedule(scheduleItems)
-          setLectureData(fallback.lecture)
-          setLabData(fallback.lab)
         }
 
         setProfile(profileRes.data ?? null)
