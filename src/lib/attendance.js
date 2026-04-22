@@ -6,7 +6,7 @@ import { apiFetch } from './api'
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
-export const SESSION_TYPES = ['regular', 'randomized', 'lecture', 'lab', 'tutorial']
+export const SESSION_TYPES = ['all', 'regular', 'randomized', 'lecture', 'lab', 'tutorial']
 export const ATTENDANCE_THRESHOLD = 75  // default % required
 
 // ─── TEACHER: SESSION MANAGEMENT ─────────────────────────────────────────────

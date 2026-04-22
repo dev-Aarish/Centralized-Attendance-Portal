@@ -5,7 +5,7 @@ const router = Router()
 
 // ─── CONSTANTS ────────────────────────────────────────────────────────────────
 
-const VALID_SESSION_TYPES = ['regular', 'randomized', 'lecture', 'lab', 'tutorial']
+const VALID_SESSION_TYPES = ['all', 'regular', 'randomized', 'lecture', 'lab', 'tutorial']
 
 // ─── HELPERS ──────────────────────────────────────────────────────────────────
 
@@ -39,7 +39,13 @@ function enrichSubject(subject) {
   const overallPercentage = totalRecords > 0
     ? Math.round((totalAttended / totalRecords) * 100)
     : 0
-  return { ...subject, teachers, overallPercentage }
+  return { 
+    ...subject, 
+    teachers, 
+    overallPercentage,
+    totalClasses: totalRecords,
+    attendedClasses: totalAttended
+  }
 }
 
 function normalizeYear(value) {
@@ -334,7 +340,7 @@ async function buildAttendanceDetails(supabase, studentId, sessionType) {
   const classSectionIds = enrollments.map(e => e.class_section_id)
 
   // ── Single query: all sessions of the requested type across all enrolled sections ──
-  const { data: sessions, error: sessionError } = await supabase
+  let sessionQuery = supabase
     .from('attendance_sessions')
     .select(`
       id,
@@ -348,8 +354,13 @@ async function buildAttendanceDetails(supabase, studentId, sessionType) {
       )
     `)
     .in('class_section_id', classSectionIds)
-    .eq('session_type', sessionType)
     .order('session_date', { ascending: false })
+
+  if (sessionType !== 'all') {
+    sessionQuery = sessionQuery.eq('session_type', sessionType)
+  }
+
+  const { data: sessions, error: sessionError } = await sessionQuery
 
   if (sessionError) return []
   if (!sessions?.length) {

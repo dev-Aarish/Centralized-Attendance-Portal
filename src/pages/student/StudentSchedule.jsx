@@ -72,6 +72,7 @@ export default function StudentSchedule() {
 
       setProfileSection(profileRes?.data?.section || '');
       const rawItems = data.data || [];
+      console.log("FETCHED SCHEDULE DATA:", rawItems);
 
       if (rawItems.length === 0) {
         setSchedule([]);
@@ -106,7 +107,7 @@ export default function StudentSchedule() {
             duration: Math.max(1, endHour - startHour),
             title: s.class_sections?.courses?.name,
             code: s.class_sections?.courses?.code,
-            instructor: s.class_sections?.teacher_assignments?.[0]?.teacher_profiles?.profiles?.full_name || 'Unassigned',
+            instructor: s.resolved_teacher_name || s.class_sections?.teacher_assignments?.[0]?.teacher_profiles?.profiles?.full_name || 'Unassigned',
             room: roomNumber,
             section: s.class_sections?.section,
           };

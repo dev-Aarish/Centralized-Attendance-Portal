@@ -1,4 +1,5 @@
 import { Router } from 'express'
+import { supabaseAdmin } from '../lib/supabase.js'
 
 const router = Router()
 const DAY_ORDER = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday', 'Sunday']
@@ -212,7 +213,8 @@ router.get('/student', async (req, res) => {
     }
 
     // Step 2: Try enrollments first
-    const { data: enr, error: enrError } = await req.supabase
+    const db = supabaseAdmin || req.supabase
+    const { data: enr, error: enrError } = await db
       .from('enrollments')
       .select('class_section_id')
       .eq('student_id', sp.id)
@@ -230,7 +232,7 @@ router.get('/student', async (req, res) => {
     if (sp.department) {
       const studentDepartment = normalizeDepartment(sp.department)
 
-      let query = req.supabase
+      let query = db
         .from('class_sections')
         .select(`
           id,
@@ -249,7 +251,7 @@ router.get('/student', async (req, res) => {
       // If strict section filtering yields no candidates, retry without section
       // so mismatched section naming does not hide all student courses.
       if ((!candidates || candidates.length === 0) && sp.section) {
-        const fallback = await req.supabase
+        const fallback = await db
           .from('class_sections')
           .select(`
             id,
@@ -284,7 +286,7 @@ router.get('/student', async (req, res) => {
 
       // Second-pass fallback without section constraint if still empty.
       if (matchedSections.length === 0 && sp.section) {
-        const deptWide = await req.supabase
+        const deptWide = await db
           .from('class_sections')
           .select(`
             id,
@@ -339,7 +341,7 @@ router.get('/student', async (req, res) => {
     let error = null
 
     if (sectionIds.length > 0) {
-      const result = await req.supabase
+      const result = await db
         .from('class_schedules')
         .select('*, class_sections (section, year_of_study, department, courses (name, code, semester), teacher_assignments(teacher_profiles(profiles(full_name))))')
         .in('class_section_id', sectionIds)
@@ -355,19 +357,19 @@ router.get('/student', async (req, res) => {
     // Hard fallback: query class_schedules directly by student cohort if
     // section-id resolution yields nothing.
     if ((classSchedules || []).length === 0) {
-      classSchedules = await getCohortSchedulesDirect(req.supabase, sp)
+      classSchedules = await getCohortSchedulesDirect(db, sp)
     }
 
     // Final fallback: query by course department/semester from class_schedules
     // to avoid section-resolution failures blocking schedule display.
     if ((classSchedules || []).length === 0) {
-      classSchedules = await getCourseScopedSchedulesFallback(req.supabase, sp)
+      classSchedules = await getCourseScopedSchedulesFallback(db, sp)
     }
 
     if ((classSchedules || []).length > 0) {
       normalized = (classSchedules || []).map(normalizeSchedule)
     } else {
-      const { data: legacySchedules, error: legacyError } = await req.supabase
+      const { data: legacySchedules, error: legacyError } = await db
         .from('schedules')
         .select('id, class_section_id, day_of_week, start_time, end_time, room, class_sections (course_id, section, courses (id, name, code), teacher_assignments(teacher_profiles(profiles(full_name))))')
         .in('class_section_id', sectionIds)
@@ -387,7 +389,50 @@ router.get('/student', async (req, res) => {
       }))
     }
 
+    // Manual Teacher Resolution (Bypass nested RLS bugs)
+    if (sectionIds.length > 0) {
+      const { data: assignments } = await db
+        .from('teacher_assignments')
+        .select('class_section_id, teacher_id')
+        .in('class_section_id', sectionIds)
+
+      if (assignments && assignments.length > 0) {
+        const teacherIds = assignments.map(a => a.teacher_id).filter(Boolean)
+        const { data: tProfiles } = await db
+          .from('teacher_profiles')
+          .select('id, profiles(full_name)')
+          .in('id', teacherIds)
+          
+        const teacherMap = {}
+        if (tProfiles) {
+          tProfiles.forEach(tp => {
+            teacherMap[tp.id] = tp.profiles?.full_name || 'Unknown'
+          })
+        }
+        
+        const sectionTeacherMap = {}
+        assignments.forEach(a => {
+          if (teacherMap[a.teacher_id]) {
+            sectionTeacherMap[a.class_section_id] = teacherMap[a.teacher_id]
+          }
+        })
+        
+        normalized = normalized.map(item => {
+          if (item.class_section_id && sectionTeacherMap[item.class_section_id]) {
+            return {
+              ...item,
+              resolved_teacher_name: sectionTeacherMap[item.class_section_id]
+            }
+          }
+          return item
+        })
+      }
+    }
+
     console.log('[schedule/student] Found', normalized.length || 0, 'schedule entries')
+    if (normalized.length > 0) {
+      console.dir(normalized[0], { depth: null, colors: true })
+    }
 
     const sorted = normalized.sort((a, b) => DAY_ORDER.indexOf(a.day) - DAY_ORDER.indexOf(b.day))
     return res.json({ data: sorted })
@@ -433,14 +478,15 @@ router.get('/today', async (req, res) => {
         }
       }
     } else {
-      const { data: sp } = await req.supabase
+      const db = supabaseAdmin || req.supabase
+      const { data: sp } = await db
         .from('student_profiles')
         .select('id, department, year_of_study, section, current_semester')
         .eq('profile_id', req.user.id)
         .single()
 
       if (sp) {
-        const { data: enr } = await req.supabase
+        const { data: enr } = await db
           .from('enrollments')
           .select('class_section_id')
           .eq('student_id', sp.id)
@@ -452,7 +498,7 @@ router.get('/today', async (req, res) => {
           const studentYear = normalizeYear(sp.year_of_study) ?? toYearFromSemester(sp.current_semester)
           const studentSemester = sp.current_semester ? parseInt(sp.current_semester, 10) : null
 
-          const { data: candidates } = await req.supabase
+          const { data: candidates } = await db
             .from('class_sections')
             .select('id, year_of_study, department, section, courses (semester)')
 
@@ -469,7 +515,7 @@ router.get('/today', async (req, res) => {
 
         const ids = Array.from(idSet)
         if (ids.length) {
-          const { data } = await req.supabase
+          const { data } = await db
             .from('class_schedules')
             .select('*, class_sections (section, courses (name, code), teacher_assignments(teacher_profiles(profiles(full_name))))')
             .in('class_section_id', ids)
@@ -478,11 +524,55 @@ router.get('/today', async (req, res) => {
         }
 
         if (!allData.length) {
-          const fallbackRows = await getCourseScopedSchedulesFallback(req.supabase, sp)
+          const fallbackRows = await getCourseScopedSchedulesFallback(db, sp)
           allData = (fallbackRows || []).map(normalizeSchedule)
         }
       }
     }
+    
+    // Manual Teacher Resolution (Bypass nested RLS bugs)
+    if (allData.length > 0) {
+      const sectionIds = Array.from(new Set(allData.map(d => d.class_section_id).filter(Boolean)))
+      if (sectionIds.length > 0) {
+        const { data: assignments } = await db
+          .from('teacher_assignments')
+          .select('class_section_id, teacher_id')
+          .in('class_section_id', sectionIds)
+
+        if (assignments && assignments.length > 0) {
+          const teacherIds = assignments.map(a => a.teacher_id).filter(Boolean)
+          const { data: tProfiles } = await db
+            .from('teacher_profiles')
+            .select('id, profiles(full_name)')
+            .in('id', teacherIds)
+            
+          const teacherMap = {}
+          if (tProfiles) {
+            tProfiles.forEach(tp => {
+              teacherMap[tp.id] = tp.profiles?.full_name || 'Unknown'
+            })
+          }
+          
+          const sectionTeacherMap = {}
+          assignments.forEach(a => {
+            if (teacherMap[a.teacher_id]) {
+              sectionTeacherMap[a.class_section_id] = teacherMap[a.teacher_id]
+            }
+          })
+          
+          allData = allData.map(item => {
+            if (item.class_section_id && sectionTeacherMap[item.class_section_id]) {
+              return {
+                ...item,
+                resolved_teacher_name: sectionTeacherMap[item.class_section_id]
+              }
+            }
+            return item
+          })
+        }
+      }
+    }
+
     const todayOnly = allData.filter(s => s.day === today)
     return res.json({ data: todayOnly })
   } catch (err) { return res.status(500).json({ error: 'Internal server error' }) }

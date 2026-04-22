@@ -19,6 +19,7 @@ const COURSE_COLORS = [
 const SPECIAL_BLOCKS = [
   { id: 'special-library', code: 'LIB', name: 'Library', teacherName: '—', isSpecial: true, specialColor: 'bg-slate-100 dark:bg-slate-800/60 text-slate-700 dark:text-slate-300 border-slate-300 dark:border-slate-700 border-dashed' },
   { id: 'special-remedial', code: 'REM', name: 'Remedial', teacherName: '—', isSpecial: true, specialColor: 'bg-orange-50 dark:bg-orange-900/30 text-orange-700 dark:text-orange-300 border-orange-300 dark:border-orange-800 border-dashed' },
+  { id: 'special-lunch', code: 'LUNCH', name: 'Lunch Break', teacherName: '—', isSpecial: true, specialColor: 'bg-yellow-50 dark:bg-yellow-900/30 text-yellow-700 dark:text-yellow-300 border-yellow-300 dark:border-yellow-800 border-dashed' },
 ]
 
 const getCourseColor = (courseId) => {
@@ -386,7 +387,7 @@ export default function AdminSchedule() {
 
         {/* Footer note */}
         <div className="text-xs text-gray-400 text-center shrink-0 pb-2">
-          Library & Remedial blocks are for visual planning — only assigned courses are saved to the database.
+          Library, Remedial & Lunch Break blocks are for visual planning — only assigned courses are saved to the database.
         </div>
       </div>
     </AppLayout>
