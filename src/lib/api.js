@@ -1,6 +1,6 @@
 import { supabase } from './supabase'
 
-const API_BASE = import.meta.env.VITE_API_URL || 'http://localhost:3001'
+const API_BASE = import.meta.env.VITE_API_URL;
 const DEFAULT_CACHE_TTL_MS = 60 * 1000
 const DEFAULT_STALE_WINDOW_MS = 5 * 60 * 1000
 const MAX_CACHE_ENTRIES = 200

@@ -1,40 +1,27 @@
+# Dependency directories
+node_modules/
+jspm_packages/
+
 # Logs
 logs
 *.log
 npm-debug.log*
 yarn-debug.log*
 yarn-error.log*
-pnpm-debug.log*
-lerna-debug.log*
 
-node_modules
-dist
-dist-ssr
-*.local
-
-# Editor directories and files
-.vscode/*
-!.vscode/extensions.json
-.idea
-.DS_Store
-*.suo
-*.ntvs*
-*.njsproj
-*.sln
-*.sw?
-
-# Environment files
+# Environment variables
 .env
-backend/.env
-# Python virtual environment
-venv/
-.venv/
+.env.test
+.env.local
 
-# Graphify output
-graphify-out/
+# Build outputs
+dist/
+build/
+.next/
+out/
+.nuxt/
 
-# Optional (recommended)
-__pycache__/
-*.pyc
-
-.agent/
+# IDE/Editor files
+.vscode/
+.idea/
+.DS_Store
