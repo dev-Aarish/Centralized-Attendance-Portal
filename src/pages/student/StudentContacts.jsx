@@ -1,6 +1,7 @@
 import { useState, useEffect, useRef } from 'react'
 import AppLayout from '../../components/shared/AppLayout'
 import { getStudentContacts } from '../../lib/contacts'
+import SpiralLoader from '../../components/shared/Loader'
 
 export default function StudentContacts() {
   const [contacts, setContacts] = useState([])
@@ -68,8 +69,8 @@ export default function StudentContacts() {
         </div>
 
         {loading ? (
-          <div className="flex justify-center py-20">
-            <div className="w-10 h-10 border-4 border-blue-100 dark:border-blue-900 border-t-blue-600 dark:border-t-blue-400 rounded-full animate-spin"></div>
+          <div className="flex justify-center py-24">
+            <SpiralLoader />
           </div>
         ) : error ? (
           <div className="bg-red-50 dark:bg-red-900/20 text-red-600 dark:text-red-400 p-4 rounded-xl border border-red-100 dark:border-red-800/30 text-center text-sm font-medium">

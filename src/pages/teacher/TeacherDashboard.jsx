@@ -1,7 +1,7 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import AppLayout from '../../components/shared/AppLayout'
-import { getMyAssignedSections } from '../../lib/profile'
+import { getMyAssignedSections, getMyTeacherStats } from '../../lib/profile'
 import { getTodaySchedule } from '../../lib/schedule'
 
 function parseTime(value) {
@@ -32,16 +32,19 @@ export default function TeacherDashboard() {
   const navigate = useNavigate()
   const [sections, setSections] = useState([])
   const [todayClasses, setTodayClasses] = useState([])
+  const [teacherStats, setTeacherStats] = useState({ totalStudents: 0 })
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
     async function load() {
-      const [{ data: sectionData }, { data: scheduleData }] = await Promise.all([
+      const [{ data: sectionData }, { data: scheduleData }, { data: statsData }] = await Promise.all([
         getMyAssignedSections(),
         getTodaySchedule('teacher'),
+        getMyTeacherStats()
       ])
       setSections(sectionData || [])
       setTodayClasses(scheduleData || [])
+      if (statsData) setTeacherStats(statsData)
       setLoading(false)
     }
     load()
@@ -51,7 +54,7 @@ export default function TeacherDashboard() {
     { label: 'Assigned courses', value: sections.length },
     { label: 'Classes today', value: todayClasses.length },
     { label: 'Departments', value: [...new Set(sections.map((s) => s.class_sections?.courses?.department))].filter(Boolean).length },
-    { label: 'Total students', value: '—' },
+    { label: 'Total students', value: teacherStats.totalStudents || 0 },
   ]
 
   return (

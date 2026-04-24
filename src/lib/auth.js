@@ -49,8 +49,11 @@ export async function getRole() {
   if (!user) return null
 
   try {
-    const result = await apiFetch('/api/v1/profile/role')
-    return result.data?.role || null
+    const result = await apiFetch('/api/v1/profiles/role')
+    return {
+      role: result.data?.role || null,
+      adminDepartment: result.data?.adminDepartment || null
+    }
   } catch {
     return null
   }
@@ -62,7 +65,7 @@ export async function getMyProfile() {
   if (!user) return { data: null, error: new Error('Not logged in') }
 
   try {
-    const result = await apiFetch('/api/v1/profile/me')
+    const result = await apiFetch('/api/v1/profiles/me')
     return { data: result.data, error: null }
   } catch (err) {
     return { data: null, error: err }

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import AppLayout from '../../components/shared/AppLayout'
 import { apiFetch } from '../../lib/api'
+import SpiralLoader from '../../components/shared/Loader'
 
 const DEPARTMENTS = [
  { code: 'CSE', name: 'Computer Science & Engineering' },
@@ -237,11 +238,9 @@ return (
          </div>
         </div>
        ) : detailsLoading ? (
-        <div className="px-6 py-8 text-center">
-         <div className="inline-block">
-          <div className="w-8 h-8 border-4 border-gray-300 dark:border-gray-700 border-t-blue-500 rounded-full animate-spin" />
-         </div>
-         <p className="mt-4 text-gray-600 dark:text-gray-400">Loading {viewType}...</p>
+        <div className="px-6 py-12 text-center flex flex-col items-center justify-center gap-4">
+         <SpiralLoader />
+         <p className="text-gray-600 dark:text-gray-400 font-medium text-sm tracking-wide">Loading {viewType}...</p>
         </div>
        ) : (
         <div className="px-6 py-6">
@@ -292,7 +291,7 @@ return (
                   {teacher.fullName}
                  </p>
                  <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                  :e-mail: {teacher.email}
+                  Email: {teacher.email}
                  </p>
                  <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
                   Employee ID: {teacher.employeeId}
@@ -333,7 +332,7 @@ return (
                      {student.fullName}
                     </p>
                     <p className="text-sm text-gray-600 dark:text-gray-400 mt-1">
-                     :e-mail: {student.email}
+                     Email: {student.email}
                     </p>
                     <p className="text-xs text-gray-500 dark:text-gray-500 mt-1">
                      Roll No: {student.rollNumber}

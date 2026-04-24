@@ -5,6 +5,7 @@
 import { useState, useEffect, useRef } from 'react'
 import AppLayout from '../../components/shared/AppLayout'
 import AttendanceRings from '../../components/student/AttendanceRings'
+import SpiralLoader from '../../components/shared/Loader'
 
 // ✅ Fix 1: correct import path — attendanceApi, not attendance
 import { getMyAttendanceSummaryByType } from '../../lib/attendance'
@@ -149,9 +150,9 @@ export default function StudentDashboard() {
         {/* ✅ Fix 4: all states now use consistent Tailwind classes */}
 
         {loading && (
-          <div className="flex flex-col items-center justify-center py-16 gap-4">
-            <div className="w-8 h-8 rounded-full border-2 border-indigo-200 border-t-indigo-500 animate-spin" />
-            <p className="text-sm text-slate-400 font-medium">Loading attendance data…</p>
+          <div className="flex flex-col items-center justify-center py-24 gap-6">
+            <SpiralLoader />
+            <p className="text-sm text-slate-400 font-medium tracking-wide">Loading attendance data…</p>
           </div>
         )}
 

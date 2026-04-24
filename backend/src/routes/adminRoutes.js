@@ -860,6 +860,57 @@ router.get('/departments/:department/sections', async (req, res) => {
 })
 
 /**
+ * GET /api/v1/admin/sections/all
+ * Get all sections across all departments
+ */
+router.get('/sections/all', async (req, res) => {
+  try {
+    const supabase = req.supabase
+    const { data, error } = await supabase
+      .from('class_sections')
+      .select(`
+        id,
+        section,
+        year_of_study,
+        department,
+        course_id,
+        courses (id, code, name),
+        teacher_assignments (
+          teacher_id,
+          teacher_profiles (
+            profiles (full_name)
+          )
+        )
+      `)
+      .order('year_of_study, section, department')
+
+    if (error) return res.status(500).json({ error: error.message })
+
+    const enriched = (data || []).map((s) => {
+      const teachers = (s.teacher_assignments || []).map(a => ({
+        id: a.teacher_id,
+        name: a.teacher_profiles?.profiles?.full_name || 'Unknown'
+      }))
+      return {
+        id: s.id,
+        section: s.section,
+        yearOfStudy: s.year_of_study,
+        department: s.department,
+        courseId: s.course_id,
+        courses: s.courses,
+        teachers,
+        teacherName: teachers.length > 0 ? teachers.map(t => t.name).join(', ') : 'Unassigned',
+      }
+    })
+
+    return res.json({ data: enriched })
+  } catch (err) {
+    console.error('GET /admin/sections/all error:', err)
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+/**
 
  * GET /api/v1/admin/routines
  * Fetch routines for a cohort
@@ -872,17 +923,21 @@ router.get('/routines', async (req, res) => {
     const db = supabaseAdmin || supabase
     const numYear = normalizeYear(year)
 
-    if (!department || numYear === null || !section) {
-      return res.status(400).json({ error: 'department, year, and section are required' })
+    if (numYear === null || !section) {
+      return res.status(400).json({ error: 'year and section are required' })
     }
 
-    const { data, error } = await db
+    let query = db
       .from('class_routines')
       .select('*')
-      .eq('department', department)
       .eq('year_of_study', numYear)
       .eq('section', section)
-      .order('created_at', { ascending: false })
+
+    if (department) {
+      query = query.eq('department', department)
+    }
+
+    const { data, error } = await query.order('created_at', { ascending: false })
 
     if (error) return res.status(500).json({ error: error.message })
     return res.json({ data })
@@ -903,8 +958,9 @@ router.post('/routines', async (req, res) => {
     const supabase = req.supabase
     const db = supabaseAdmin || supabase
     const numYear = normalizeYear(year)
+    const effectiveDept = department || 'GLOBAL'
 
-    if (!name || !department || numYear === null || !section) {
+    if (!name || numYear === null || !section) {
       return res.status(400).json({ error: 'Missing required fields' })
     }
 
@@ -912,7 +968,6 @@ router.post('/routines', async (req, res) => {
     const { count } = await db
       .from('class_routines')
       .select('id', { count: 'exact', head: true })
-      .eq('department', department)
       .eq('year_of_study', numYear)
       .eq('section', section)
 
@@ -923,7 +978,7 @@ router.post('/routines', async (req, res) => {
       .from('class_routines')
       .insert({
         name,
-        department,
+        department: effectiveDept,
         year_of_study: numYear,
         section,
         is_active: isFirst
@@ -941,9 +996,13 @@ router.post('/routines', async (req, res) => {
         const { data: sections } = await db
           .from('class_sections')
           .select('id')
-          .eq('department', department)
           .eq('year_of_study', numYear)
           .eq('section', section)
+          
+        if (department) {
+          // If department provided, filter sections by it
+          // Otherwise, take all sections for that cohort
+        }
           
         if (sections && sections.length > 0) {
           const secIds = sections.map(s => s.id)
@@ -992,11 +1051,10 @@ router.put('/routines/:id/activate', async (req, res) => {
 
     if (!routine) return res.status(404).json({ error: 'Routine not found' })
 
-    // Deactivate all others in the same cohort
+    // Deactivate all others in the same cohort (across ALL departments)
     await db
       .from('class_routines')
       .update({ is_active: false })
-      .eq('department', routine.department)
       .eq('year_of_study', routine.year_of_study)
       .eq('section', routine.section)
 
@@ -1120,16 +1178,11 @@ router.get('/departments/summary', async (req, res) => {
  */
 router.get('/schedules', async (req, res) => {
   try {
-    const { sectionId, sectionIds, routineId } = req.query
+    const { sectionId, sectionIds, routineId, year, section } = req.query
     const supabase = req.supabase
+    const db = supabaseAdmin || supabase
 
-    if (!sectionId && !sectionIds) {
-      return res.status(400).json({ error: 'sectionId or sectionIds is required' })
-    }
-
-    const ids = sectionIds ? sectionIds.split(',') : [sectionId]
-
-    let query = supabase
+    let query = db
       .from('class_schedules')
       .select(`
         id,
@@ -1142,14 +1195,17 @@ router.get('/schedules', async (req, res) => {
         teacher_id,
         courses (id, code, name)
       `)
-      .in('class_section_id', ids)
-      .order('day')
-      
+
     if (routineId) {
       query = query.eq('routine_id', routineId)
+    } else if (sectionIds || sectionId) {
+      const ids = sectionIds ? sectionIds.split(',') : [sectionId]
+      query = query.in('class_section_id', ids)
+    } else {
+      return res.status(400).json({ error: 'routineId or sectionIds is required' })
     }
 
-    const { data, error } = await query
+    const { data, error } = await query.order('day')
 
     if (error) {
       return res.status(500).json({ error: error.message })
@@ -1273,12 +1329,12 @@ router.delete('/schedules/:id', async (req, res) => {
  */
 router.put('/schedules/replace', async (req, res) => {
   try {
-    const { sectionIds, routineId, schedules } = req.body
+    const { sectionIds, routineId, schedules, year, section } = req.body
     const supabase = req.supabase
     const db = supabaseAdmin || supabase
 
-    if (!sectionIds || !Array.isArray(sectionIds) || !schedules || !Array.isArray(schedules) || !routineId) {
-      return res.status(400).json({ error: 'sectionIds, routineId, and schedules arrays are required' })
+    if (!Array.isArray(schedules) || !routineId) {
+      return res.status(400).json({ error: 'routineId and schedules array are required' })
     }
 
     if (sectionIds.length > 0) {
@@ -1296,20 +1352,28 @@ router.put('/schedules/replace', async (req, res) => {
 
     // 2. Insert new schedules
     if (schedules.length > 0) {
-      // 2a. Resolve missing class_section_ids
-      // All sectionIds provided belong to the same cohort (dept, year, section).
-      // We need to find or create class_sections for courses that don't have one in this cohort.
-      const { data: refSections, error: refError } = await db
-        .from('class_sections')
-        .select('*')
-        .in('id', sectionIds)
-        .limit(1)
-      
-      if (refError || !refSections?.length) {
-        return res.status(400).json({ error: 'Invalid sectionIds provided' })
+      if ((!sectionIds || sectionIds.length === 0) && (!year || !section)) {
+        return res.status(400).json({ error: 'Either sectionIds or year/section must be provided' })
+      }
+
+      let cohort = null
+      if (sectionIds && sectionIds.length > 0) {
+        const { data: refSections } = await db
+          .from('class_sections')
+          .select('*')
+          .in('id', sectionIds)
+          .limit(1)
+        if (refSections?.length) cohort = refSections[0]
       }
       
-      const cohort = refSections[0]
+      if (!cohort && year && section) {
+        cohort = { year_of_study: normalizeYear(year), section: String(section).trim().toUpperCase(), department: req.body.adminDepartment || 'GLOBAL' }
+      }
+
+      if (!cohort) {
+        return res.status(400).json({ error: 'Could not resolve cohort context' })
+      }
+      
       const processedSchedules = []
 
       for (let s of schedules) {

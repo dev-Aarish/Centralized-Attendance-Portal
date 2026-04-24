@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import { getMyAttendanceDetails } from '../../lib/attendance'
 import AppLayout from '../../components/shared/AppLayout'
+import SpiralLoader from '../../components/shared/Loader'
 
 export default function StudentCanISkip() {
   const [expandedSubject, setExpandedSubject] = useState(null)
@@ -65,9 +66,9 @@ export default function StudentCanISkip() {
         </div>
 
         {loading ? (
-          <div className="flex flex-col items-center justify-center py-16 gap-4">
-            <div className="w-8 h-8 rounded-full border-2 border-indigo-200 border-t-indigo-500 animate-spin" />
-            <p className="text-sm text-slate-400 font-medium">Loading attendance data…</p>
+          <div className="flex flex-col items-center justify-center py-20 gap-6">
+            <SpiralLoader />
+            <p className="text-sm text-slate-400 font-medium tracking-wide">Calculating skipping thresholds…</p>
           </div>
         ) : error ? (
           <div className="py-10 px-6 text-center rounded-2xl bg-red-50 border border-red-100">

@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import AppLayout from '../../components/shared/AppLayout';
 import { apiFetch } from '../../lib/api';
+import SpiralLoader from '../../components/shared/Loader';
 import { useAuth } from '../../hooks/useAuth';
 
 const timeSlots = Array.from({ length: 10 }, (_, i) => {
@@ -92,8 +93,8 @@ export default function TeacherSchedule() {
           className={`flex-1 bg-slate-900 rounded-[2rem] border border-slate-800 shadow-2xl overflow-hidden flex flex-col transition-all duration-1000 delay-100 transform ${mounted ? 'opacity-100 translate-y-0' : 'opacity-0 translate-y-8'}`}
         >
           {loading ? (
-            <div className="flex-1 flex items-center justify-center">
-              <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-emerald-500"></div>
+            <div className="flex-1 flex items-center justify-center py-20">
+              <SpiralLoader />
             </div>
           ) : schedule.length === 0 ? (
             <div className="flex-1 flex items-center justify-center text-slate-500">

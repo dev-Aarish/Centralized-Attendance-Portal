@@ -40,9 +40,9 @@ app.get('/api/health', (req, res) => {
 })
 
 // All API routes require authentication
-app.use('/api/v1/profile', requireAuth, profileRoutes)
+app.use('/api/v1/profiles', requireAuth, profileRoutes)
 app.use('/api/v1/attendance', requireAuth, attendanceRoutes)
-app.use('/api/v1/schedule', requireAuth, scheduleRoutes)
+app.use('/api/v1/schedules', requireAuth, scheduleRoutes)
 app.use('/api/v1/marks', requireAuth, marksRoutes)
 app.use('/api/v1/content', requireAuth, contentRoutes)
 app.use('/api/v1/contacts', requireAuth, contactRoutes)

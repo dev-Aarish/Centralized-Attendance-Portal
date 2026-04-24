@@ -281,12 +281,53 @@ async function getEffectiveEnrollmentsForStudent(supabase, studentProfile) {
   const studentYear = normalizeYear(studentProfile.year_of_study) ?? toYearFromSemester(studentProfile.current_semester)
   const studentSemester = studentProfile.current_semester ? parseInt(studentProfile.current_semester, 10) : null
 
+  // NEW: Fetch sections from the active routine for this cohort to support cross-departmental courses
+  const { data: activeRoutine } = await supabase
+    .from('class_routines')
+    .select('id')
+    .eq('year_of_study', studentYear)
+    .eq('section', studentProfile.section)
+    .eq('is_active', true)
+    .single()
+
+  let routineSectionIds = []
+  if (activeRoutine) {
+    const { data: routineSchedules } = await supabase
+      .from('class_schedules')
+      .select('class_section_id')
+      .eq('routine_id', activeRoutine.id)
+    
+    routineSectionIds = (routineSchedules || []).map(s => s.class_section_id).filter(Boolean)
+  }
+
   const matchedSections = (candidates || []).filter((c) => {
     const sectionYear = normalizeYear(c.year_of_study)
     const sectionSemester = c.courses?.semester ? parseInt(c.courses.semester, 10) : null
 
     return matchesStudentCohort(studentYear, studentSemester, sectionYear, sectionSemester)
   })
+
+  // Merge in sections from the active routine (cross-dept support)
+  if (routineSectionIds.length > 0) {
+    const { data: routineSections } = await supabase
+      .from('class_sections')
+      .select(`
+        id,
+        section,
+        year_of_study,
+        department,
+        courses ( id, name, code, semester, type )
+      `)
+      .in('id', routineSectionIds)
+    
+    if (routineSections) {
+      routineSections.forEach(rs => {
+        if (!matchedSections.find(ms => ms.id === rs.id)) {
+          matchedSections.push(rs)
+        }
+      })
+    }
+  }
 
   const finalSections = matchedSections.length
     ? matchedSections

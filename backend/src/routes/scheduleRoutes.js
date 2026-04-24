@@ -499,19 +499,33 @@ router.get('/student', async (req, res) => {
 
 router.get('/teacher', async (req, res) => {
   try {
-    const { data: tp } = await req.supabase.from('teacher_profiles').select('id').eq('profile_id', req.user.id).single()
+    const db = supabaseAdmin || req.supabase
+    const { data: tp } = await db.from('teacher_profiles').select('id').eq('profile_id', req.user.id).single()
     if (!tp) return res.json({ data: [] })
-    const { data: asgn } = await req.supabase.from('teacher_assignments').select('class_section_id').eq('teacher_id', tp.id)
-    if (!asgn?.length) return res.json({ data: [] })
-    const ids = asgn.map(a => a.class_section_id)
-    const { data, error } = await req.supabase
-      .from('class_schedules')
+    
+    const { data: asgn } = await db.from('teacher_assignments').select('class_section_id').eq('teacher_id', tp.id)
+    const assignedSectionIds = (asgn || []).map(a => a.class_section_id)
+    
+    let query = db.from('class_schedules')
       .select('*, class_routines!inner(is_active), class_sections (section, courses (name, code), teacher_assignments(teacher_profiles(profiles(full_name))))')
-      .in('class_section_id', ids)
       .eq('class_routines.is_active', true)
       .order('day', { ascending: true })
+
+    if (assignedSectionIds.length > 0) {
+      query = query.or(`class_section_id.in.(${assignedSectionIds.join(',')}),teacher_id.eq.${tp.id}`)
+    } else {
+      query = query.eq('teacher_id', tp.id)
+    }
+
+    const { data, error } = await query
     if (error) return res.status(400).json({ error: error.message })
-    const normalized = (data || []).map(normalizeSchedule)
+    
+    const filtered = (data || []).filter(s => {
+      if (s.teacher_id) return s.teacher_id === tp.id
+      return assignedSectionIds.includes(s.class_section_id)
+    })
+    
+    const normalized = filtered.map(normalizeSchedule)
     const sorted = normalized.sort((a, b) => DAY_ORDER.indexOf(a.day) - DAY_ORDER.indexOf(b.day))
     return res.json({ data: sorted })
   } catch (err) { return res.status(500).json({ error: 'Internal server error' }) }
@@ -523,15 +537,33 @@ router.get('/today', async (req, res) => {
     const days = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
     const today = days[new Date().getDay()]
     let allData = []
+    
     if (role === 'teacher') {
-      const { data: tp } = await req.supabase.from('teacher_profiles').select('id').eq('profile_id', req.user.id).single()
+      const db = supabaseAdmin || req.supabase
+      const { data: tp } = await db.from('teacher_profiles').select('id').eq('profile_id', req.user.id).single()
       if (tp) {
-        const { data: asgn } = await req.supabase.from('teacher_assignments').select('class_section_id').eq('teacher_id', tp.id)
-        if (asgn?.length) {
-          const ids = asgn.map(a => a.class_section_id)
-          const { data } = await req.supabase.from('class_schedules').select('*, class_routines!inner(is_active), class_sections (section, courses (name, code), teacher_assignments(teacher_profiles(profiles(full_name))))').in('class_section_id', ids).eq('class_routines.is_active', true).order('day', { ascending: true })
-          allData = (data || []).map(normalizeSchedule)
+        const { data: asgn } = await db.from('teacher_assignments').select('class_section_id').eq('teacher_id', tp.id)
+        const assignedSectionIds = (asgn || []).map(a => a.class_section_id)
+
+        let query = db.from('class_schedules')
+          .select('*, class_routines!inner(is_active), class_sections (section, courses (name, code), teacher_assignments(teacher_profiles(profiles(full_name))))')
+          .eq('class_routines.is_active', true)
+          .order('day', { ascending: true })
+
+        if (assignedSectionIds.length > 0) {
+          query = query.or(`class_section_id.in.(${assignedSectionIds.join(',')}),teacher_id.eq.${tp.id}`)
+        } else {
+          query = query.eq('teacher_id', tp.id)
         }
+
+        const { data } = await query
+        
+        const filtered = (data || []).filter(s => {
+          if (s.teacher_id) return s.teacher_id === tp.id
+          return assignedSectionIds.includes(s.class_section_id)
+        })
+
+        allData = filtered.map(normalizeSchedule)
       }
     } else {
       const db = supabaseAdmin || req.supabase

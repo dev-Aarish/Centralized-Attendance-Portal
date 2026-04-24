@@ -40,6 +40,13 @@ function normalizeSection(value) {
   return String(value).trim().toUpperCase()
 }
 
+function getDepartmentFromEmail(email) {
+  if (!email) return null
+  const localPart = email.split('@')[0].toUpperCase()
+  const DEPARTMENTS = ['CSE', 'IT', 'ECE', 'EE', 'ME', 'CE']
+  return DEPARTMENTS.find(d => d === localPart) || null
+}
+
 function matchesStudentCohort(studentYear, studentSemester, sectionYear, sectionSemester) {
   const yearMatches = studentYear == null || sectionYear == null || sectionYear === studentYear
   const semesterMatches = studentSemester == null || sectionSemester == null || sectionSemester === studentSemester
@@ -120,19 +127,28 @@ router.get('/me', async (req, res) => {
   }
 })
 
-// GET /api/v1/profile/role — current user's role
+// GET /api/v1/profile/role — current user's role and admin department
 router.get('/role', async (req, res) => {
   try {
     const { data, error } = await req.supabase
       .from('profiles')
-      .select('role')
+      .select('*')
       .eq('id', req.user.id)
       .single()
 
+    if (error || !data) {
+      // If error is just missing column, we still want the role
+      console.warn('GET /profile/role fetch warning:', error?.message)
+      return res.json({ data: { role: data?.role || null, adminDepartment: data?.department || null } })
+    }
+    
+    // If admin, infer department from email if column is empty
+    let adminDept = data.department || null
+    if (data.role === 'admin' && !adminDept) {
+      adminDept = getDepartmentFromEmail(data.email)
+    }
 
-
-    if (error || !data) return res.json({ data: { role: null } })
-    return res.json({ data: { role: data.role } })
+    return res.json({ data: { role: data.role, adminDepartment: adminDept } })
   } catch (err) {
     console.error('GET /profile/role error:', err)
     return res.status(500).json({ error: 'Internal server error' })
@@ -201,20 +217,71 @@ router.get('/assigned-sections', async (req, res) => {
     const { data, error } = await req.supabase
       .from('teacher_assignments')
       .select(`
-        *,
-        class_sections (
-          *,
-          courses (
-            id, code, name, department, semester
-          )
-        )
-      `)
+        *,
+        class_sections (
+          *,
+          courses (
+            id, code, name, department, semester
+          )
+        )
+      `)
       .eq('teacher_id', teacherProfile.id)
 
     if (error) return res.status(400).json({ error: error.message })
     return res.json({ data })
   } catch (err) {
     console.error('GET /profile/assigned-sections error:', err)
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/v1/profile/teacher/stats — teacher's aggregate stats
+router.get('/teacher/stats', async (req, res) => {
+  try {
+    const db = supabaseAdmin || req.supabase
+    const { data: teacherProfile } = await req.supabase
+      .from('teacher_profiles')
+      .select('id')
+      .eq('profile_id', req.user.id)
+      .single()
+
+    if (!teacherProfile) return res.status(404).json({ error: 'Teacher profile not found' })
+
+    // 1. Get all assigned class_section_ids
+    const { data: assignments } = await req.supabase
+      .from('teacher_assignments')
+      .select('class_section_id')
+      .eq('teacher_id', teacherProfile.id)
+
+    const sectionIds = (assignments || []).map(a => a.class_section_id)
+
+    if (sectionIds.length === 0) {
+      return res.json({
+        data: {
+          totalStudents: 0,
+          totalSections: 0
+        }
+      })
+    }
+
+    // 2. Count unique students across these sections
+    const { data: enrollments, error: enrollmentError } = await db
+      .from('enrollments')
+      .select('student_id')
+      .in('class_section_id', sectionIds)
+
+    if (enrollmentError) throw enrollmentError
+
+    const uniqueStudents = new Set((enrollments || []).map(e => e.student_id))
+
+    return res.json({
+      data: {
+        totalStudents: uniqueStudents.size,
+        totalSections: sectionIds.length
+      }
+    })
+  } catch (err) {
+    console.error('GET /profile/teacher/stats error:', err)
     return res.status(500).json({ error: 'Internal server error' })
   }
 })

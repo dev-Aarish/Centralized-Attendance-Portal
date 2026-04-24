@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../hooks/useAuth'
 import { supabase } from '../lib/supabase'
+import SpiralLoader from '../components/shared/Loader'
 
 const DEPARTMENTS = [
  { value: 'CSE', label: 'Computer Science & Engineering' },
@@ -149,9 +150,9 @@ export default function OnboardingPage() {
 if (loading || checking) {
   return (
    <div className="min-h-screen bg-gray-50 dark:bg-gray-950 flex items-center justify-center">
-    <div className="flex flex-col items-center gap-4">
-     <div className="w-8 h-8 rounded-full border-2 border-blue-200 dark:border-blue-900 border-t-blue-500 animate-spin" />
-     <p className="text-sm text-gray-400 dark:text-gray-500">Checking account...</p>
+    <div className="flex flex-col items-center gap-6">
+     <SpiralLoader />
+     <p className="text-sm text-gray-400 dark:text-gray-500 font-medium tracking-wide">Checking account...</p>
     </div>
    </div>
   )

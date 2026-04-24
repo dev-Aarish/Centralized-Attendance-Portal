@@ -1,8 +1,11 @@
 import { useState, useEffect, useRef } from 'react'
 import AppLayout from '../../components/shared/AppLayout'
 import { apiFetch } from '../../lib/api'
+import SpiralLoader from '../../components/shared/Loader'
+import { useAuth } from '../../hooks/useAuth'
 
-const DEPARTMENTS = ['CSE', 'IT', 'ECE', 'EE', 'ME', 'CE']
+const YEARS = ['1st', '2nd', '3rd', '4th']
+const SECTIONS = ['A', 'B', 'C', 'D', 'E', 'F']
 const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
 const HOURS = Array.from({ length: 10 }, (_, i) => ({ start: 8 + i, label: `${8 + i}:00` }))
 const TOTAL_HOURS = HOURS.length
@@ -29,9 +32,11 @@ const getCourseColor = (courseId) => {
 }
 
 export default function AdminSchedule() {
-  const [department, setDepartment] = useState('')
-  const [cohorts, setCohorts] = useState([])
-  const [selectedCohortId, setSelectedCohortId] = useState('')
+  const { adminDepartment } = useAuth()
+  const [selectedYear, setSelectedYear] = useState('')
+  const [selectedSection, setSelectedSection] = useState('')
+  const [allSections, setAllSections] = useState([])
+  const [cohort, setCohort] = useState(null)
   const [routines, setRoutines] = useState([])
   const [selectedRoutineId, setSelectedRoutineId] = useState('')
   const [allCourses, setAllCourses] = useState([])
@@ -43,26 +48,38 @@ export default function AdminSchedule() {
   const [successMsg, setSuccessMsg] = useState(null)
   const [resizing, setResizing] = useState(null)
   const [editingBlock, setEditingBlock] = useState(null)
+  const [allTeachers, setAllTeachers] = useState([])
   const editPopoverRef = useRef(null)
   const trackRefs = useRef({})
 
-  // Fetch all courses on mount
-  useEffect(() => { fetchAllCourses() }, [])
-
-  useEffect(() => { if (department) fetchCohorts() }, [department])
+  // Fetch all courses and sections on mount
+  useEffect(() => {
+    fetchAllCourses();
+    fetchSections();
+    fetchTeachers();
+  }, [])
 
   useEffect(() => {
-    if (selectedCohortId) { fetchRoutines(); setSuccessMsg(null); setError(null) }
-    else { setRoutines([]); setSelectedRoutineId(''); setGridSchedules([]) }
-  }, [selectedCohortId, cohorts])
+    if (selectedYear && selectedSection) {
+      updateCohort();
+      fetchRoutines();
+      setSuccessMsg(null);
+      setError(null);
+    } else {
+      setCohort(null);
+      setRoutines([]);
+      setSelectedRoutineId('');
+      setGridSchedules([]);
+    }
+  }, [selectedYear, selectedSection, allSections])
 
   useEffect(() => {
-    // Fetch schedules if a routine is selected, OR if there are no routines but a cohort is selected
-    if (selectedRoutineId || (routines.length === 0 && selectedCohortId)) {
+    // Fetch schedules if a routine is selected, OR if we have Year/Section but no routines yet
+    if (selectedRoutineId || (routines.length === 0 && selectedYear && selectedSection)) {
       fetchSchedules(); setSuccessMsg(null); setError(null)
     }
     else { setGridSchedules([]) }
-  }, [selectedRoutineId, routines.length, selectedCohortId])
+  }, [selectedRoutineId, routines.length, selectedYear, selectedSection])
 
   async function fetchAllCourses() {
     try {
@@ -71,30 +88,55 @@ export default function AdminSchedule() {
     } catch (err) { console.error('Error fetching courses:', err) }
   }
 
-  async function fetchCohorts() {
+  async function fetchSections() {
     try {
       setLoading(true)
-      const data = await apiFetch(`/api/v1/admin/departments/${department}/sections`)
-      const grouped = {}
-        ; (data.data || []).forEach(s => {
-          const key = `Year ${s.yearOfStudy}-Sec ${s.section}`
-          if (!grouped[key]) {
-            grouped[key] = { id: key, yearOfStudy: s.yearOfStudy, section: s.section, label: `Section ${s.section} (Year ${s.yearOfStudy})`, classSections: [] }
-          }
-          grouped[key].classSections.push({ id: s.id, courseId: s.courseId, code: s.courses?.code, name: s.courses?.name, teacherName: s.teacherName || 'Unassigned', teachers: s.teachers || [] })
-        })
-      setCohorts(Object.values(grouped))
-      setSelectedCohortId('')
-      setGridSchedules([])
+      const data = await apiFetch('/api/v1/admin/sections/all')
+      setAllSections(data.data || [])
     } catch (err) { setError(err.message) } finally { setLoading(false) }
   }
 
+  async function fetchTeachers() {
+    try {
+      const data = await apiFetch('/api/v1/admin/users?role=teacher')
+      setAllTeachers(data.data || [])
+    } catch (err) { console.error('Error fetching teachers:', err) }
+  }
+
+  function updateCohort() {
+    const matched = allSections.filter(s => {
+      const dbYear = String(s.yearOfStudy || '').toLowerCase()
+      const selYear = String(selectedYear || '').toLowerCase()
+
+      const yearMatch = dbYear === selYear || (dbYear.startsWith(selYear[0]) && selYear.length > 0)
+      const sectionMatch = String(s.section || '').trim().toUpperCase() === String(selectedSection || '').trim().toUpperCase()
+
+      return yearMatch && sectionMatch
+    })
+
+    const key = `Year ${selectedYear}-Sec ${selectedSection}`
+    setCohort({
+      id: key,
+      yearOfStudy: parseInt(selectedYear),
+      section: selectedSection,
+      label: `Section ${selectedSection} (Year ${selectedYear})`,
+      classSections: matched.map(s => ({
+        id: s.id,
+        courseId: s.courseId,
+        code: s.courses?.code,
+        name: s.courses?.name,
+        teacherName: s.teacherName || 'Unassigned',
+        teachers: s.teachers || [],
+        department: s.department
+      }))
+    })
+  }
+
   async function fetchRoutines() {
-    const cohort = cohorts.find(c => c.id === selectedCohortId)
-    if (!cohort) return
+    if (!selectedYear || !selectedSection) return
     try {
       setLoading(true)
-      const data = await apiFetch(`/api/v1/admin/routines?department=${department}&year=${cohort.yearOfStudy}&section=${cohort.section}`)
+      const data = await apiFetch(`/api/v1/admin/routines?year=${selectedYear}&section=${selectedSection}`)
       const fetchedRoutines = data.data || []
       setRoutines(fetchedRoutines)
 
@@ -113,12 +155,14 @@ export default function AdminSchedule() {
   async function fetchSchedules() {
     // Only return if we have routines but none is selected
     if (routines.length > 0 && !selectedRoutineId) return
-    const cohort = cohorts.find(c => c.id === selectedCohortId)
-    if (!cohort || cohort.classSections.length === 0) return
+    if (!selectedYear || !selectedSection) return
+    const yearNum = parseInt(selectedYear)
     try {
       setLoading(true)
-      const sectionIds = cohort.classSections.map(cs => cs.id).join(',')
-      const url = `/api/v1/admin/schedules?sectionIds=${sectionIds}${selectedRoutineId ? `&routineId=${selectedRoutineId}` : ''}`
+      // If we have a cohort with classSections, use them. 
+      // Otherwise, we'll just fetch based on Year/Section (for routines that already have schedules)
+      const sectionIds = cohort?.classSections?.map(cs => cs.id).join(',')
+      const url = `/api/v1/admin/schedules?year=${yearNum}&section=${selectedSection}${sectionIds ? `&sectionIds=${sectionIds}` : ''}${selectedRoutineId ? `&routineId=${selectedRoutineId}` : ''}`
       const data = await apiFetch(url, {
         cache: false,
         forceRefresh: true,
@@ -151,13 +195,12 @@ export default function AdminSchedule() {
   async function handleCreateRoutine(copySource = null) {
     const name = prompt(`Enter a name for the new routine:`)
     if (!name) return
-    const cohort = cohorts.find(c => c.id === selectedCohortId)
     if (!cohort) return
     try {
       setLoading(true)
       const payload = {
         name,
-        department,
+        department: 'GLOBAL',
         year: cohort.yearOfStudy,
         section: cohort.section,
         sourceRoutineId: copySource
@@ -199,7 +242,7 @@ export default function AdminSchedule() {
   }
 
   async function handleSave() {
-    const cohort = cohorts.find(c => c.id === selectedCohortId)
+    if (!cohort) return
     if (!cohort || !selectedRoutineId) return
     try {
       setSaving(true); setError(null)
@@ -217,29 +260,48 @@ export default function AdminSchedule() {
             })
           })
         } else if (s.classSectionId || s.courseId) {
+          // Ensure teacherId is a valid UUID or null (never a name string)
+          const validTeacherId = (typeof s.teacherId === 'string' && s.teacherId.length > 20) ? s.teacherId : null;
           payload.push({
             class_section_id: s.classSectionId || null,
             course_id: s.courseId,
             day: s.day,
             time_slot: `${s.startHour}:00-${s.startHour + s.duration}:00`,
             room_number: roomToSave,
-            teacher_id: s.teacherId || null
+            teacher_id: validTeacherId
           })
         }
       })
 
-      await apiFetch('/api/v1/admin/schedules/replace', { method: 'PUT', body: JSON.stringify({ sectionIds, routineId: selectedRoutineId, schedules: payload }) })
+      const body = {
+        sectionIds,
+        routineId: selectedRoutineId,
+        schedules: payload,
+        year: selectedYear,
+        section: selectedSection,
+        adminDepartment: adminDepartment
+      }
+      await apiFetch('/api/v1/admin/schedules/replace', { method: 'PUT', body: JSON.stringify(body) })
       await fetchSchedules()
       setSuccessMsg('Schedule saved successfully!')
       setTimeout(() => setSuccessMsg(null), 3000)
     } catch (err) { setError(err.message) } finally { setSaving(false) }
   }
 
+  function handleRemove(tempId) {
+    setGridSchedules(prev => prev.filter(s => s.tempId !== tempId))
+    setEditingBlock(null)
+  }
+
+  function handleClearGrid() {
+    if (!window.confirm('Are you sure you want to clear the entire grid? This will remove all blocks from the current view (you still need to save to persist changes).')) return
+    setGridSchedules([])
+  }
+
   // Build a courseId -> classSectionId map from the cohort
-  const currentCohort = cohorts.find(c => c.id === selectedCohortId)
   const cohortCourseMap = {}
-  if (currentCohort) {
-    currentCohort.classSections.forEach(cs => { cohortCourseMap[cs.courseId] = cs })
+  if (cohort) {
+    cohort.classSections.forEach(cs => { cohortCourseMap[cs.courseId] = cs })
   }
 
   // Build palette items: all courses + special blocks
@@ -279,18 +341,16 @@ export default function AdminSchedule() {
         setError('Conflict: Overlapping classes'); setTimeout(() => setError(null), 3000); return
       }
       if (source === 'palette') {
-        // Block non-cohort, non-special courses from being dropped
-        if (!item.isSpecial && !item.classSectionId) {
-          setError('This course is not assigned to this cohort. Assign it first via Department Management.')
-          setTimeout(() => setError(null), 4000)
-          return
-        }
+        // Dropping is allowed for all items in the palette now
         setGridSchedules(prev => [...prev, {
           tempId: Math.random().toString(36).substr(2, 9),
           classSectionId: item.classSectionId || null,
           courseId: item.courseId, day: dropDay, startHour: dropHour, duration: 1,
           roomNumber: defaultRoom || '', courseCode: item.code, courseName: item.name,
-          teacherName: item.teacherName, teachers: item.teachers || [], teacherId: item.teachers && item.teachers.length === 1 ? item.teachers[0].id : null, isSpecial: !!item.isSpecial,
+          teacherName: item.teacherName || 'Unassigned', 
+          teachers: item.teachers || [], 
+          teacherId: (item.teachers && item.teachers.length === 1 && typeof item.teachers[0].id === 'string' && item.teachers[0].id.length > 20) ? item.teachers[0].id : null,
+          isSpecial: !!item.isSpecial,
           specialColor: item.specialColor || null
         }])
       } else if (source === 'grid') {
@@ -339,33 +399,70 @@ export default function AdminSchedule() {
 
   return (
     <AppLayout title="Schedule Builder">
-      <div className="flex flex-col gap-5 w-full max-w-[1500px] mx-auto" style={{ height: 'calc(100vh - 100px)' }}>
+      <div className="flex flex-col gap-5 w-full max-w-[1500px] mx-auto relative" style={{ height: 'calc(100vh - 100px)' }}>
+
+        {/* Toast Notifications */}
+        <div className="fixed top-6 right-6 z-[9999] flex flex-col gap-3 pointer-events-none">
+          {error && (
+            <div className="animate-slide-in px-4 py-3 rounded-2xl bg-red-500/90 dark:bg-red-600/90 text-white text-sm font-bold shadow-2xl backdrop-blur-md flex items-center gap-3 pointer-events-auto border border-white/20">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
+              {error}
+            </div>
+          )}
+          {successMsg && (
+            <div className="animate-slide-in px-4 py-3 rounded-2xl bg-green-500/90 dark:bg-green-600/90 text-white text-sm font-bold shadow-2xl backdrop-blur-md flex items-center gap-3 pointer-events-auto border border-white/20">
+              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
+              {successMsg}
+            </div>
+          )}
+        </div>
 
         {/* Zone 1: Top Control Bar */}
         <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl p-3 flex flex-col xl:flex-row gap-4 justify-between items-start xl:items-center shrink-0 shadow-sm">
           <div className="flex flex-wrap items-center gap-3">
+            {adminDepartment && (
+              <div className="flex flex-col">
+                <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Your Dept</label>
+                <div className="px-3 py-2 rounded-xl bg-slate-100 dark:bg-slate-800 text-slate-700 dark:text-slate-300 text-xs font-bold border border-slate-200 dark:border-slate-700">
+                  {adminDepartment}
+                </div>
+              </div>
+            )}
             <div className="flex flex-col">
-              <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Department</label>
-              <select value={department} onChange={(e) => setDepartment(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm text-gray-900 dark:text-white min-w-[120px] focus:outline-none focus:ring-2 focus:ring-blue-500">
-                <option value="" disabled>Select Department</option>
-                {DEPARTMENTS.map(d => <option key={d} value={d}>{d}</option>)}
+              <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Year</label>
+              <select value={selectedYear} onChange={(e) => setSelectedYear(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm text-gray-900 dark:text-white min-w-[100px] focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="">Year</option>
+                {YEARS.map(y => <option key={y} value={y}>{y} Year</option>)}
               </select>
             </div>
             <div className="flex flex-col">
-              <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Cohort</label>
-              <select value={selectedCohortId} onChange={(e) => setSelectedCohortId(e.target.value)} disabled={!department || cohorts.length === 0} className="px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm text-gray-900 dark:text-white min-w-[180px] focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50">
-                <option value="" disabled>{department ? (loading ? 'Loading...' : 'Select Cohort') : 'Select Section'}</option>
-                {cohorts.map(c => <option key={c.id} value={c.id}>{c.label}</option>)}
+              <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Section</label>
+              <select value={selectedSection} onChange={(e) => setSelectedSection(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm text-gray-900 dark:text-white min-w-[100px] focus:outline-none focus:ring-2 focus:ring-blue-500">
+                <option value="" disabled>Select Section</option>
+                {SECTIONS.map(s => <option key={s} value={s}>Section {s}</option>)}
               </select>
             </div>
 
-            {selectedCohortId && (
+            {cohort && (
+              <div className="flex flex-col">
+                <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Courses Found</label>
+                <div className="px-3 py-2 rounded-xl bg-blue-50 dark:bg-blue-900/20 text-blue-700 dark:text-blue-300 text-xs font-bold border border-blue-100 dark:border-blue-800/50">
+                  {cohort.classSections.length} Courses
+                </div>
+              </div>
+            )}
+
+            {cohort && (
               <div className="flex flex-col">
                 <label className="text-[10px] font-semibold text-gray-500 uppercase tracking-wider mb-1">Routine</label>
                 <div className="flex items-center gap-2">
                   <select value={selectedRoutineId} onChange={(e) => setSelectedRoutineId(e.target.value)} className="px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-800 text-sm font-medium text-gray-900 dark:text-white min-w-[160px] focus:outline-none focus:ring-2 focus:ring-blue-500">
                     <option value="" disabled>Select Routine</option>
-                    {routines.map(r => <option key={r.id} value={r.id}>{r.name} {r.is_active ? '(Active)' : ''}</option>)}
+                    {routines.map(r => (
+                      <option key={r.id} value={r.id}>
+                        {r.name} {r.department !== 'GLOBAL' ? `(${r.department})` : ''} {r.is_active ? '✓ Active' : ''}
+                      </option>
+                    ))}
                   </select>
                   <button onClick={() => handleCreateRoutine(null)} className="px-2.5 py-2 rounded-xl bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs font-medium transition-colors" title="Create Fresh Routine">New</button>
                   <button onClick={() => handleCreateRoutine(selectedRoutineId)} disabled={!selectedRoutineId} className="px-2.5 py-2 rounded-xl bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs font-medium transition-colors disabled:opacity-50" title="Duplicate Current Routine">Copy</button>
@@ -385,8 +482,7 @@ export default function AdminSchedule() {
             </div>
           </div>
           <div className="flex items-center gap-2">
-            {error && <span className="text-xs text-red-500 max-w-[150px] truncate">{error}</span>}
-            {successMsg && <span className="text-xs text-green-500 font-medium max-w-[150px] truncate">{successMsg}</span>}
+            {saving && <span className="text-xs text-gray-400 animate-pulse">Syncing changes...</span>}
             {selectedRoutineId && (
               <button
                 onClick={handleActivateRoutine}
@@ -398,6 +494,9 @@ export default function AdminSchedule() {
             )}
             <button onClick={handleSave} disabled={!selectedRoutineId || saving || loading} className="px-4 py-2 rounded-xl bg-blue-600 hover:bg-blue-700 text-white text-xs font-medium transition-colors shadow-sm disabled:opacity-50 disabled:cursor-not-allowed">
               {saving ? 'Saving...' : 'Save Schedule'}
+            </button>
+            <button onClick={handleClearGrid} disabled={gridSchedules.length === 0} className="px-4 py-2 rounded-xl bg-gray-100 dark:bg-gray-800 hover:bg-gray-200 dark:hover:bg-gray-700 text-gray-700 dark:text-gray-300 text-xs font-medium transition-colors">
+              Clear Grid
             </button>
           </div>
         </div>
@@ -426,7 +525,7 @@ export default function AdminSchedule() {
                 <div key={item.id} draggable onDragStart={(e) => handleDragStart(e, item, 'palette')} className={`p-2.5 rounded-xl border transition-shadow cursor-grab active:cursor-grabbing hover:shadow-md ${item.isCohortCourse ? getCourseColor(item.courseId) : 'bg-white dark:bg-gray-800 border-gray-200 dark:border-gray-700 text-gray-700 dark:text-gray-300'}`}>
                   <div className="flex items-center justify-between">
                     <div className="font-bold text-xs">{item.code}</div>
-                    {item.isCohortCourse ? <span className="text-[8px] bg-black/10 dark:bg-white/10 px-1.5 py-0.5 rounded font-bold">ASSIGNED</span> : <span className="text-[8px] px-1.5 py-0.5 rounded font-bold">NOT IN COHORT</span>}
+                    {item.isCohortCourse ? <span className="text-[8px] bg-black/10 dark:bg-white/10 px-1.5 py-0.5 rounded font-bold uppercase">Assigned</span> : <span className="text-[8px] bg-blue-50 dark:bg-blue-900/40 text-blue-600 dark:text-blue-400 px-1.5 py-0.5 rounded font-bold uppercase">Available</span>}
                   </div>
                   <div className="text-[10px] opacity-90 mt-0.5 leading-tight line-clamp-1">{item.name}</div>
                   {item.teacherName && <div className="text-[10px] mt-1 opacity-70 flex items-center gap-1">
@@ -441,7 +540,7 @@ export default function AdminSchedule() {
 
           {/* Zone 3: Horizontal Time Grid — days as rows, hours as columns */}
           <div className="flex-1 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl overflow-auto custom-scrollbar relative select-none">
-            {loading && <div className="absolute inset-0 flex items-center justify-center bg-white/50 dark:bg-gray-900/50 z-50"><div className="animate-spin rounded-full h-8 w-8 border-b-2 border-blue-600"></div></div>}
+            {loading && <div className="absolute inset-0 flex items-center justify-center bg-white/50 dark:bg-gray-900/50 z-50"><SpiralLoader /></div>}
 
             <div className="min-w-[900px]">
               {/* Hour headers */}
@@ -521,20 +620,38 @@ export default function AdminSchedule() {
                                 {!schedule.isSpecial && (
                                   <div>
                                     <label className="text-xs font-medium text-gray-500 block mb-1">Teacher</label>
-                                    {schedule.teachers && schedule.teachers.length > 1 ? (
-                                      <select
-                                        value={schedule.teacherId || ''}
-                                        onChange={(e) => setGridSchedules(prev => prev.map(s => s.tempId === schedule.tempId ? { ...s, teacherId: e.target.value } : s))}
-                                        className="w-full px-2.5 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 focus:outline-none focus:border-blue-500"
-                                      >
-                                        <option value="" disabled>Select a teacher</option>
-                                        {schedule.teachers.map(t => (
-                                          <option key={t.id} value={t.id}>{t.name}</option>
-                                        ))}
-                                      </select>
-                                    ) : (
-                                      <div className="text-sm text-gray-600 dark:text-gray-400">{schedule.teacherName || '—'}</div>
-                                    )}
+                                      { (schedule.teachers && schedule.teachers.length > 0) ? (
+                                        <select
+                                          value={schedule.teacherId || ''}
+                                          onChange={(e) => {
+                                            const tId = e.target.value;
+                                            const tObj = schedule.teachers.find(t => t.id === tId);
+                                            setGridSchedules(prev => prev.map(s => s.tempId === schedule.tempId ? { ...s, teacherId: tId, teacherName: tObj?.name || '—' } : s));
+                                          }}
+                                          className="w-full px-2.5 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 focus:outline-none focus:border-blue-500"
+                                        >
+                                          <option value="" disabled>Select a teacher</option>
+                                          {schedule.teachers.map(t => (
+                                            <option key={t.id} value={t.id}>{t.name}</option>
+                                          ))}
+                                        </select>
+                                      ) : (
+                                        <select
+                                          value={schedule.teacherId || ''}
+                                          onChange={(e) => {
+                                            const tId = e.target.value;
+                                            const tObj = allTeachers.find(t => t.teacherDetails?.id === tId);
+                                            const tName = tObj ? (tObj.fullName || tObj.full_name || tObj.name) : '—';
+                                            setGridSchedules(prev => prev.map(s => s.tempId === schedule.tempId ? { ...s, teacherId: tId, teacherName: tName } : s));
+                                          }}
+                                          className="w-full px-2.5 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 focus:outline-none focus:border-blue-500"
+                                        >
+                                          <option value="">No teacher assigned</option>
+                                          {allTeachers.map(t => (
+                                            <option key={t.id} value={t.teacherDetails?.id}>{t.fullName || t.full_name || t.name || t.email}</option>
+                                          ))}
+                                        </select>
+                                      )}
                                   </div>
                                 )}
                                 <div>
@@ -543,10 +660,11 @@ export default function AdminSchedule() {
                                 </div>
                               </div>
                               <button
-                                onClick={(e) => { e.stopPropagation(); setGridSchedules(prev => prev.filter(s => s.tempId !== schedule.tempId)); setEditingBlock(null) }}
-                                className="w-full mt-3 px-3 py-2 rounded-lg bg-red-500 hover:bg-red-600 text-white text-xs font-medium transition-colors"
+                                onClick={(e) => { e.stopPropagation(); handleRemove(schedule.tempId) }}
+                                className="w-full mt-4 py-2.5 rounded-xl bg-red-50 hover:bg-red-100 dark:bg-red-500/10 dark:hover:bg-red-500/20 text-red-600 dark:text-red-400 text-xs font-bold border border-red-100 dark:border-red-500/20 transition-all active:scale-95 flex items-center justify-center gap-2"
                               >
-                                Remove from Schedule
+                                <svg className="w-3.5 h-3.5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M19 7l-.867 12.142A2 2 0 0116.138 21H7.862a2 2 0 01-1.995-1.858L5 7m5 4v6m4-6v6m1-10V4a1 1 0 00-1-1h-4a1 1 0 00-1 1v3M4 7h16" /></svg>
+                                Remove Entry
                               </button>
                             </div>
                           )}

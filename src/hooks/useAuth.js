@@ -4,6 +4,7 @@ import { getRole, getUser, onAuthStateChange } from '../lib/auth'
 export function useAuth() {
   const [user, setUser] = useState(null)
   const [role, setRole] = useState(() => localStorage.getItem('role'))
+  const [adminDepartment, setAdminDepartment] = useState(() => localStorage.getItem('adminDepartment'))
   const [loading, setLoading] = useState(true)
 
   useEffect(() => {
@@ -17,17 +18,22 @@ export function useAuth() {
 
         if (user) {
           setUser(user)
-          const freshRole = await getRole()
+          const fresh = await getRole()
           if (!mounted) return
-          // Only update role if we got a fresh value; keep localStorage cache if fetch returns null
-          if (freshRole) {
-            setRole(freshRole)
-            localStorage.setItem('role', freshRole)
+          if (fresh) {
+            setRole(fresh.role)
+            setAdminDepartment(fresh.adminDepartment)
+            if (fresh.role) localStorage.setItem('role', fresh.role)
+            else localStorage.removeItem('role')
+            if (fresh.adminDepartment) localStorage.setItem('adminDepartment', fresh.adminDepartment)
+            else localStorage.removeItem('adminDepartment')
           } else {
-            // getRole() returned null — keep existing role from localStorage or set null if none exists
-            const cached = localStorage.getItem('role')
-            setRole(cached)
-            if (!cached) localStorage.removeItem('role')
+            const cachedRole = localStorage.getItem('role')
+            const cachedDept = localStorage.getItem('adminDepartment')
+            setRole(cachedRole)
+            setAdminDepartment(cachedDept)
+            if (!cachedRole) localStorage.removeItem('role')
+            if (!cachedDept) localStorage.removeItem('adminDepartment')
           }
         } else {
           setUser(null)
@@ -51,22 +57,29 @@ export function useAuth() {
 
       if (session?.user) {
         setUser(session.user)
-        const freshRole = await getRole()
+        const fresh = await getRole()
         if (!mounted) return
-        // Only update role if we got a fresh value; keep localStorage cache if fetch returns null
-        if (freshRole) {
-          setRole(freshRole)
-          localStorage.setItem('role', freshRole)
+        if (fresh) {
+          setRole(fresh.role)
+          setAdminDepartment(fresh.adminDepartment)
+          if (fresh.role) localStorage.setItem('role', fresh.role)
+          else localStorage.removeItem('role')
+          if (fresh.adminDepartment) localStorage.setItem('adminDepartment', fresh.adminDepartment)
+          else localStorage.removeItem('adminDepartment')
         } else {
-          // getRole() returned null — keep existing role from localStorage or set null if none exists
-          const cached = localStorage.getItem('role')
-          setRole(cached)
-          if (!cached) localStorage.removeItem('role')
+          const cachedRole = localStorage.getItem('role')
+          const cachedDept = localStorage.getItem('adminDepartment')
+          setRole(cachedRole)
+          setAdminDepartment(cachedDept)
+          if (!cachedRole) localStorage.removeItem('role')
+          if (!cachedDept) localStorage.removeItem('adminDepartment')
         }
       } else {
         setUser(null)
         setRole(null)
+        setAdminDepartment(null)
         localStorage.removeItem('role')
+        localStorage.removeItem('adminDepartment')
       }
       if (mounted) setLoading(false)
     })
@@ -77,5 +90,5 @@ export function useAuth() {
     }
   }, [])
 
-  return { user, role, loading }
+  return { user, role, adminDepartment, loading }
 }
