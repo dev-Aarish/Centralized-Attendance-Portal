@@ -4,13 +4,14 @@ import { apiFetch } from '../../lib/api';
 import { useAuth } from '../../hooks/useAuth';
 import { getMyStudentProfile } from '../../lib/profile';
 import SpiralLoader from '../../components/shared/Loader';
+import { formatCohort, formatYearSection } from '../../lib/format';
 
-const timeSlots = Array.from({ length: 10 }, (_, i) => {
-  const hour = 8 + i;
+const timeSlots = Array.from({ length: 9 }, (_, i) => {
+  const hour = 9 + i;
   return hour > 12 ? `${hour - 12}:00 PM` : hour === 12 ? `12:00 PM` : `${hour}:00 AM`;
 });
 
-const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+const days = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday'];
 
 const DAY_MAP = {
   mon: 'Monday',
@@ -60,6 +61,7 @@ export default function StudentSchedule() {
   const [mounted, setMounted] = useState(false);
   const [schedule, setSchedule] = useState([]);
   const [profileSection, setProfileSection] = useState('');
+  const [profileYear, setProfileYear] = useState('');
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
   const { user } = useAuth();
@@ -81,6 +83,7 @@ export default function StudentSchedule() {
       ]);
 
       setProfileSection(profileRes?.data?.section || '');
+      setProfileYear(profileRes?.data?.year_of_study || '');
       const rawItems = data.data || [];
       console.log("FETCHED SCHEDULE DATA:", rawItems);
 
@@ -140,7 +143,7 @@ export default function StudentSchedule() {
   const currentSection = loading
     ? 'Loading...'
     : resolvedSection
-      ? `Section ${resolvedSection}`
+      ? formatYearSection(profileYear, resolvedSection)
       : 'Section not assigned';
 
   return (
@@ -257,7 +260,7 @@ export default function StudentSchedule() {
                   const rowEnd = rowStart + 1;
 
                   // Convert start time (e.g. 8) to column index. 8 -> col 2.
-                  const colStart = 2 + (item.start - 8);
+                  const colStart = 2 + (item.start - 9);
                   const colEnd = colStart + item.duration;
 
                   const styleClasses = getTypeStyles(item.code);
@@ -278,7 +281,7 @@ export default function StudentSchedule() {
                       style={{
                         gridColumn: `${colStart}/${colEnd}`,
                         gridRow: `${rowStart}/${rowEnd}`,
-                        animationDelay: `${(dayIndex * 50) + ((item.start - 8) * 20)}ms`,
+                        animationDelay: `${(dayIndex * 50) + ((item.start - 9) * 20)}ms`,
                         animationFillMode: 'both',
                         animation: mounted ? `fadeInUp 0.5s cubic-bezier(0.16, 1, 0.3, 1) forwards` : 'none'
                       }}
