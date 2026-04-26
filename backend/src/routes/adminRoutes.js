@@ -45,6 +45,17 @@ function normalizeDepartment(value) {
   if (compact === 'CE' || compact.includes('CIVIL')) return 'CE'
   return compact
 }
+
+function slotsOverlap(slot1, slot2) {
+  if (!slot1 || !slot2) return false
+  const parse = (s) => s.split('-').map(t => {
+    const [h, m] = t.split(':').map(Number)
+    return h * 60 + (m || 0)
+  })
+  const [s1, e1] = parse(slot1)
+  const [s2, e2] = parse(slot2)
+  return Math.max(s1, s2) < Math.min(e1, e2)
+}
 /**
  * GET /api/v1/admin/stats
  * Get overall system statistics
@@ -798,19 +809,19 @@ router.get('/cohorts', async (req, res) => {
     // Unique by combination
     const unique = []
     const seen = new Set()
-    
-    ;(data || []).forEach(s => {
-      const key = `${s.department}-${s.year_of_study}-${s.section}`
-      if (!seen.has(key) && s.department && s.year_of_study && s.section) {
-        seen.add(key)
-        unique.push({
-          department: s.department,
-          yearOfStudy: s.year_of_study,
-          section: s.section,
-          label: `${s.department} Year ${s.year_of_study} Section ${s.section}`
-        })
-      }
-    })
+
+      ; (data || []).forEach(s => {
+        const key = `${s.department}-${s.year_of_study}-${s.section}`
+        if (!seen.has(key) && s.department && s.year_of_study && s.section) {
+          seen.add(key)
+          unique.push({
+            department: s.department,
+            yearOfStudy: s.year_of_study,
+            section: s.section,
+            label: `${s.department} · Year ${s.year_of_study} · Section ${s.section}`
+          })
+        }
+      })
 
     return res.json({ data: unique.sort((a, b) => a.label.localeCompare(b.label)) })
   } catch (err) {
@@ -1009,19 +1020,19 @@ router.post('/routines', async (req, res) => {
     // Duplicate schedules if requested
     if (sourceRoutineId) {
       let oldSchedulesQuery = db.from('class_schedules').select('*')
-      
+
       if (sourceRoutineId === 'original') {
         const { data: sections } = await db
           .from('class_sections')
           .select('id')
           .eq('year_of_study', numYear)
           .eq('section', section)
-          
+
         if (department) {
           // If department provided, filter sections by it
           // Otherwise, take all sections for that cohort
         }
-          
+
         if (sections && sections.length > 0) {
           const secIds = sections.map(s => s.id)
           oldSchedulesQuery = oldSchedulesQuery.is('routine_id', null).in('class_section_id', secIds)
@@ -1383,7 +1394,7 @@ router.put('/schedules/replace', async (req, res) => {
           .limit(1)
         if (refSections?.length) cohort = refSections[0]
       }
-      
+
       if (!cohort && year && section) {
         const numYear = normalizeYear(year)
         if (!numYear || numYear < 1 || numYear > 4) {
@@ -1403,12 +1414,12 @@ router.put('/schedules/replace', async (req, res) => {
       }
       // class_sections.year_of_study is a TEXT column expecting ordinal strings ('1st', '2nd', etc.)
       const cohortYearOrdinal = yearToOrdinal(cohortYearNum)
-      
+
       const processedSchedules = []
 
       for (let s of schedules) {
         let finalSectionId = s.class_section_id
-        
+
         if (!finalSectionId && s.course_id) {
           // Check if a section already exists for this course in this cohort
           const { data: existing } = await db
@@ -1419,7 +1430,7 @@ router.put('/schedules/replace', async (req, res) => {
             .eq('year_of_study', cohortYearOrdinal)
             .eq('section', cohort.section)
             .single()
-          
+
           if (existing) {
             finalSectionId = existing.id
           } else {
@@ -1440,7 +1451,7 @@ router.put('/schedules/replace', async (req, res) => {
               })
               .select('id')
               .single()
-            
+
             if (createError) {
               console.error('[schedules/replace] class_section insert error:', createError.message, { course_id: s.course_id, year_of_study: cohortYearOrdinal, section: cohort.section, department: cohort.department })
               return res.status(400).json({ error: `Failed to create section for course ${s.course_id}: ${createError.message}` })
@@ -1459,6 +1470,50 @@ router.put('/schedules/replace', async (req, res) => {
             teacher_id: s.teacher_id || null,
             routine_id: routineId
           })
+        }
+      }
+
+      // 1. Internal conflict check
+      for (let i = 0; i < processedSchedules.length; i++) {
+        for (let j = i + 1; j < processedSchedules.length; j++) {
+          const s1 = processedSchedules[i]
+          const s2 = processedSchedules[j]
+          if (s1.day === s2.day && slotsOverlap(s1.time_slot, s2.time_slot)) {
+            const roomConflict = s1.room_number && s1.room_number.trim().toLowerCase() === s2.room_number?.trim().toLowerCase()
+            const teacherConflict = s1.teacher_id && s1.teacher_id === s2.teacher_id
+
+            if (roomConflict && teacherConflict) {
+              return res.status(409).json({ error: `Internal Conflict: Room ${s1.room_number} and Teacher are both assigned twice at ${s1.time_slot} on ${s1.day}.` })
+            } else if (roomConflict) {
+              return res.status(409).json({ error: `Internal Conflict: Room ${s1.room_number} assigned twice at ${s1.time_slot} on ${s1.day}.` })
+            } else if (teacherConflict) {
+              return res.status(409).json({ error: `Internal Conflict: Teacher assigned twice at ${s1.time_slot} on ${s1.day}.` })
+            }
+          }
+        }
+      }
+
+      // 2. External conflict check against other routines
+      const { data: ext } = await db
+        .from('class_schedules')
+        .select(`id, day, time_slot, room_number, teacher_id, class_sections (department, year_of_study, section), courses (code)`)
+        .neq('routine_id', routineId)
+
+      for (let s of processedSchedules) {
+        for (let e of ext || []) {
+          if (s.day === e.day && slotsOverlap(s.time_slot, e.time_slot)) {
+            const label = e.class_sections ? `${e.class_sections.department} · Year ${e.class_sections.year_of_study} · Section ${e.class_sections.section}` : 'Another routine'
+            const roomConflict = s.room_number && s.room_number.trim().toLowerCase() === e.room_number?.trim().toLowerCase()
+            const teacherConflict = s.teacher_id && s.teacher_id === e.teacher_id
+
+            if (roomConflict && teacherConflict) {
+              return res.status(409).json({ error: `Conflict: Room ${s.room_number} and Teacher are both occupied by ${e.courses?.code || 'another class'} (${label}) at ${s.time_slot} on ${s.day}.` })
+            } else if (roomConflict) {
+              return res.status(409).json({ error: `Room Conflict: Room ${s.room_number} occupied by ${e.courses?.code || 'another class'} (${label}) at ${s.time_slot} on ${s.day}.` })
+            } else if (teacherConflict) {
+              return res.status(409).json({ error: `Teacher Conflict: Teacher taking ${e.courses?.code || 'another class'} (${label}) at ${s.time_slot} on ${s.day}.` })
+            }
+          }
         }
       }
 

@@ -1,7 +1,9 @@
 import { Router } from 'express'
+import multer from 'multer'
 import { supabaseAdmin } from '../lib/supabase.js'
 
 const router = Router()
+const upload = multer({ storage: multer.memoryStorage() })
 
 function hashString(input) {
   let hash = 2166136261
@@ -245,6 +247,17 @@ router.get('/student', async (req, res) => {
       }, {})
     }
 
+    let submittedAssignmentIds = new Set()
+    if (assignmentIds.length > 0) {
+      const { data: submissionRows } = await supabaseAdmin
+        .from('assignment_submissions')
+        .select('assignment_id')
+        .eq('student_id', studentProfile.id)
+        .in('assignment_id', assignmentIds)
+        
+      submittedAssignmentIds = new Set((submissionRows || []).map(r => r.assignment_id))
+    }
+
     let sectionQuestionMap = {}
     if (sectionIds.length > 0) {
       const { data: sectionQuestionRows, error: sectionQuestionError } = await db
@@ -432,6 +445,7 @@ router.get('/student', async (req, res) => {
           required: 75,
         },
         isAccessible: canAccess,
+        hasSubmitted: submittedAssignmentIds.has(a.id),
         blockedReason: canAccess
           ? null
           : 'Minimum 75% attendance required in this course to access assignment questions.',
@@ -772,6 +786,138 @@ router.delete('/:id', async (req, res) => {
     return res.json({ success: true })
   } catch (err) {
     console.error('DELETE /assignments/:id error:', err)
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+/**
+ * POST /api/v1/assignments/:id/submit
+ * Upload an assignment submission
+ */
+router.post('/:id/submit', upload.single('file'), async (req, res) => {
+  try {
+    const { id: assignmentId } = req.params
+    const file = req.file
+    const user = req.user
+
+    if (!file) return res.status(400).json({ error: 'No file provided' })
+    if (file.mimetype !== 'application/pdf') return res.status(400).json({ error: 'Only PDF files are allowed' })
+    if (file.size > 200 * 1024) return res.status(400).json({ error: 'File size must not exceed 200KB' })
+
+    const { data: studentProfile } = await req.supabase
+      .from('student_profiles')
+      .select('id')
+      .eq('profile_id', user.id)
+      .single()
+
+    if (!studentProfile) return res.status(403).json({ error: 'Student profile not found' })
+
+    const { data: existingSubmission } = await supabaseAdmin
+      .from('assignment_submissions')
+      .select('id')
+      .eq('student_id', studentProfile.id)
+      .eq('assignment_id', assignmentId)
+      .single()
+
+    if (existingSubmission) {
+      return res.status(400).json({ error: 'You have already submitted an answer for this assignment.' })
+    }
+
+    const filePath = `${assignmentId}/${studentProfile.id}/${Date.now()}_${file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_')}`
+
+    const { error: uploadError } = await supabaseAdmin.storage
+      .from('submissions')
+      .upload(filePath, file.buffer, {
+        contentType: file.mimetype,
+      })
+
+    if (uploadError) return res.status(400).json({ error: uploadError.message })
+
+    const { error: insertError } = await supabaseAdmin
+      .from('assignment_submissions')
+      .insert({
+        student_id: studentProfile.id,
+        assignment_id: assignmentId,
+        file_url: filePath
+      })
+
+    if (insertError) {
+      return res.status(400).json({ error: 'Failed to record submission in database' })
+    }
+
+    return res.json({ success: true, message: 'Assignment submitted successfully!' })
+  } catch (err) {
+    console.error('POST /assignments/:id/submit error:', err)
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+/**
+ * GET /api/v1/assignments/:id/submissions
+ * Get submissions for an assignment
+ */
+router.get('/:id/submissions', async (req, res) => {
+  try {
+    const { id: assignmentId } = req.params
+    const user = req.user
+    const teacherId = await getTeacherProfileId(req.supabase, user.id)
+
+    if (!teacherId) {
+      return res.status(403).json({ error: 'Teacher profile not found' })
+    }
+
+    const { data: assignment, error: getError } = await req.supabase
+      .from('assignments')
+      .select('id, created_by')
+      .eq('id', assignmentId)
+      .single()
+
+    if (getError || !assignment || assignment.created_by !== teacherId) {
+      return res.status(403).json({ error: 'Not authorized to view submissions for this assignment' })
+    }
+
+    const { data: submissions, error: subError } = await supabaseAdmin
+      .from('assignment_submissions')
+      .select(`
+        student_id,
+        file_url,
+        submitted_at,
+        student_profiles (
+          id,
+          roll_number,
+          year_of_study,
+          department,
+          section,
+          profiles ( full_name )
+        )
+      `)
+      .eq('assignment_id', assignmentId)
+
+    if (subError) return res.status(400).json({ error: subError.message })
+    if (!submissions || submissions.length === 0) return res.json({ data: [] })
+
+    const data = await Promise.all(submissions.map(async (sub) => {
+      const { data: urlData } = await supabaseAdmin.storage
+        .from('submissions')
+        .createSignedUrl(sub.file_url, 3600)
+        
+      const info = sub.student_profiles
+      return {
+        student_id: sub.student_id,
+        file_name: sub.file_url.split('/').pop(),
+        submitted_at: sub.submitted_at,
+        file_url: urlData?.signedUrl,
+        student_name: info?.profiles?.full_name || 'Unknown Student',
+        roll_number: info?.roll_number || 'N/A',
+        department: info?.department || 'N/A',
+        year: info?.year_of_study || 'N/A',
+        section: info?.section || 'N/A'
+      }
+    }))
+
+    return res.json({ data })
+  } catch (err) {
+    console.error('GET /assignments/:id/submissions error:', err)
     return res.status(500).json({ error: 'Internal server error' })
   }
 })

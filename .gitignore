@@ -27,6 +27,6 @@ out/
 .DS_Store
 
 
-agent/
+.agent
 .venv/
 graphify-out/

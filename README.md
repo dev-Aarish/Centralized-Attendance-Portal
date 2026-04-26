@@ -81,7 +81,7 @@ Whether it's managing large student datasets, handling leave requests, sending t
 - **Backend**: Node.js (implied)
 - **Authentication**: Auth.js with OTP and magic links
 - **Real-time**: Socket.io
-- **Database**: Supabase (PostgreSQL) for relational data + MongoDB-style flexibility for attendance logs where needed
+- **Database**: Supabase (PostgreSQL) for relational data 
 - **Notifications**: Email + real-time via Socket.io
 
 
