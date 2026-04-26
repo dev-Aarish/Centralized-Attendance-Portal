@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import AppLayout from '../../components/shared/AppLayout'
 import { getMyAssignedSections, getMyTeacherStats } from '../../lib/profile'
 import { getTodaySchedule } from '../../lib/schedule'
+import { formatCohort } from '../../lib/format'
 
 function parseTime(value) {
   if (!value || typeof value !== 'string') return null
@@ -216,9 +217,7 @@ export default function TeacherDashboard() {
                         <div className="flex items-center gap-2 flex-wrap">
                           {(department || yearOfStudy || section) && (
                             <span className={`text-[10px] font-semibold px-2 py-0.5 rounded-full border ${color.badge}`}>
-                              {department && `${department} `}
-                              {yearOfStudy && `Year ${yearOfStudy} `}
-                              {section && `· Sec ${section}`}
+                              {formatCohort(department, yearOfStudy, section)}
                             </span>
                           )}
                           <span className="text-xs text-gray-400 dark:text-gray-500">
@@ -279,7 +278,7 @@ export default function TeacherDashboard() {
                     {s.class_sections?.courses?.name}
                   </p>
                   <p className="text-xs text-gray-400 dark:text-gray-500 mt-0.5">
-                    {s.class_sections?.courses?.code} · {s.class_sections?.section || 'No section'} · {s.class_sections?.department}
+                    {formatCohort(s.class_sections?.department, s.class_sections?.year_of_study, s.class_sections?.section)}
                   </p>
                 </div>
               ))}

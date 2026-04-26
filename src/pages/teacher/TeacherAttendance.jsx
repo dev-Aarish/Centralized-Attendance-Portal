@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useState } from 'react'
+import { formatCohort } from '../../lib/format'
 import AppLayout from '../../components/shared/AppLayout'
 import { getMyAssignedSections, getStudentsInSection } from '../../lib/profile'
 import {
@@ -62,6 +63,10 @@ export default function TeacherAttendance() {
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
 
+  const [todaySchedules, setTodaySchedules] = useState([])
+  const [selectedTimeSlot, setSelectedTimeSlot] = useState('')
+  const [loadingSchedule, setLoadingSchedule] = useState(false)
+
   useEffect(() => {
     async function loadSectionsAndHistory() {
       setLoadingSections(true)
@@ -90,6 +95,34 @@ export default function TeacherAttendance() {
 
     loadSectionsAndHistory()
   }, [])
+
+  useEffect(() => {
+    async function loadTodaySchedule() {
+      if (!selectedSectionId) {
+        setTodaySchedules([])
+        setSelectedTimeSlot('')
+        return
+      }
+
+      setLoadingSchedule(true)
+      try {
+        const res = await fetch(`/api/v1/schedules/today?role=teacher`).then(r => r.json())
+        const myToday = (res.data || []).filter(s => s.classSectionId === selectedSectionId || s.class_section_id === selectedSectionId)
+        setTodaySchedules(myToday)
+        
+        if (myToday.length === 1) {
+          setSelectedTimeSlot(myToday[0].timeSlot || myToday[0].time_slot || '')
+        } else {
+          setSelectedTimeSlot('')
+        }
+      } catch (err) {
+        console.error('Failed to load today schedule:', err)
+      } finally {
+        setLoadingSchedule(false)
+      }
+    }
+    loadTodaySchedule()
+  }, [selectedSectionId])
 
   async function refreshPastSessions(sectionList) {
     const sessionLists = await Promise.all(
@@ -196,7 +229,7 @@ export default function TeacherAttendance() {
 
   async function resolveSessionIdForSubmit() {
     const sessionType = selectedSessionType || inferSessionTypeFromSection(activeSection)
-    const createRes = await createAttendanceSession(activeSection.class_section_id, sessionType)
+    const createRes = await createAttendanceSession(activeSection.class_section_id, sessionType, selectedTimeSlot)
 
     if (!createRes.error && createRes.data?.id) {
       return createRes.data.id
@@ -214,7 +247,7 @@ export default function TeacherAttendance() {
 
     const today = new Date().toISOString().split('T')[0]
     const existing = (sessionsRes.data || []).find(
-      (s) => s.session_date === today && s.session_type === sessionType
+      (s) => s.session_date === today && s.session_type === sessionType && (s.time_slot === selectedTimeSlot || (!s.time_slot && !selectedTimeSlot))
     )
 
     if (!existing?.id) {
@@ -287,7 +320,7 @@ export default function TeacherAttendance() {
                       <option value="" disabled>Choose a class...</option>
                       {sections.map((s) => (
                         <option key={s.id} value={s.class_section_id}>
-                          {s.class_sections?.courses?.department} - Section {s.class_sections?.section || 'N/A'} ({s.class_sections?.courses?.name})
+                          {formatCohort(s.class_sections?.department, s.class_sections?.year_of_study, s.class_sections?.section)} ({s.class_sections?.courses?.name})
                         </option>
                       ))}
                     </select>
@@ -308,9 +341,27 @@ export default function TeacherAttendance() {
                     </select>
                   </div>
 
+                  {todaySchedules.length > 0 && (
+                    <div className="flex flex-col gap-1.5">
+                      <label className="text-xs font-semibold text-gray-500 uppercase tracking-wider ml-1">Class Slot</label>
+                      <select
+                        value={selectedTimeSlot}
+                        onChange={(e) => setSelectedTimeSlot(e.target.value)}
+                        className="w-full px-4 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                      >
+                        <option value="">Select a time slot</option>
+                        {todaySchedules.map((s, i) => (
+                          <option key={i} value={s.timeSlot || s.time_slot}>
+                            {s.timeSlot || s.time_slot}
+                          </option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
                   <button
                     onClick={handleStartSession}
-                    disabled={!selectedSectionId}
+                    disabled={!selectedSectionId || (todaySchedules.length > 0 && !selectedTimeSlot)}
                     className="md:col-span-3 w-full sm:w-auto px-6 py-2.5 rounded-xl bg-blue-600 hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed text-white text-sm font-medium transition-colors"
                   >
                     Start Session
@@ -336,7 +387,7 @@ export default function TeacherAttendance() {
                     <div key={idx} className="bg-white dark:bg-gray-800 border border-gray-100 dark:border-gray-700 rounded-2xl overflow-hidden shadow-sm">
                       <div className="bg-gray-50 dark:bg-gray-800/80 px-5 py-3 border-b border-gray-100 dark:border-gray-700">
                         <h3 className="text-sm font-semibold text-gray-800 dark:text-gray-200">
-                          {group.section.class_sections?.courses?.department} - Section {group.section.class_sections?.section}
+                          {formatCohort(group.section.class_sections?.department, group.section.class_sections?.year_of_study, group.section.class_sections?.section)}
                         </h3>
                         <p className="text-xs text-gray-500 mt-0.5">
                           {group.section.class_sections?.courses?.name}
@@ -369,7 +420,7 @@ export default function TeacherAttendance() {
                                   )}
                                 </div>
                                 <p className="text-xs text-gray-500 mt-0.5">
-                                  Session ID: {session.id} · Type: {session.session_type || 'regular'}
+                                  Session ID: {session.id} · Type: {session.session_type || 'regular'} {session.time_slot && `· Slot: ${session.time_slot}`}
                                 </p>
                               </div>
                             </div>
@@ -397,10 +448,10 @@ export default function TeacherAttendance() {
             <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-4 mb-2">
               <div>
                 <h2 className="text-lg font-bold text-gray-900 dark:text-white">
-                  {activeSection.class_sections?.courses?.department} - Section {activeSection.class_sections?.section}
+                  {formatCohort(activeSection.class_sections?.department, activeSection.class_sections?.year_of_study, activeSection.class_sections?.section)}
                 </h2>
                 <p className="text-sm text-gray-500 dark:text-gray-400 mt-0.5">
-                  {activeSection.class_sections?.courses?.name} · {new Date().toDateString()} · {selectedSessionType}
+                  {activeSection.class_sections?.courses?.name} · {new Date().toDateString()} · {selectedSessionType} {selectedTimeSlot && `· ${selectedTimeSlot}`}
                 </p>
               </div>
               <button
