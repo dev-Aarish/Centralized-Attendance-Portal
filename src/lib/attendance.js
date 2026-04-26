@@ -17,15 +17,16 @@ export const ATTENDANCE_THRESHOLD = 75  // default % required
  *
  * @param {string} classSectionId
  * @param {'regular'|'randomized'|'lecture'|'lab'|'tutorial'} sessionType
+ * @param {string} timeSlot
  * @returns {{ data: { id: string, session_date: string, session_type: string } | null, error: Error | null }}
  */
-export async function createAttendanceSession(classSectionId, sessionType = 'regular') {
+export async function createAttendanceSession(classSectionId, sessionType = 'regular', timeSlot = '') {
   if (!SESSION_TYPES.includes(sessionType)) {
     return { data: null, error: new Error(`Invalid session type: "${sessionType}"`) }
   }
   return apiFetch('/api/v1/attendance/sessions', {
     method: 'POST',
-    body: JSON.stringify({ classSectionId, sessionType }),
+    body: JSON.stringify({ classSectionId, sessionType, timeSlot }),
   }).then(r => ({ data: r.data, error: null }))
     .catch(err => ({ data: null, error: err }))
 }
