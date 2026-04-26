@@ -5,9 +5,9 @@ import SpiralLoader from '../../components/shared/Loader'
 import { useAuth } from '../../hooks/useAuth'
 
 const YEARS = ['1st', '2nd', '3rd', '4th']
-const SECTIONS = ['A', 'B', 'C', 'D', 'E', 'F']
-const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday']
-const HOURS = Array.from({ length: 10 }, (_, i) => ({ start: 8 + i, label: `${8 + i}:00` }))
+const SECTIONS = ['A', 'B', 'C']
+const DAYS = ['Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday']
+const HOURS = Array.from({ length: 9 }, (_, i) => ({ start: 9 + i, label: `${9 + i}:00` }))
 const TOTAL_HOURS = HOURS.length
 
 const COURSE_COLORS = [
@@ -58,6 +58,17 @@ export default function AdminSchedule() {
     fetchSections();
     fetchTeachers();
   }, [])
+
+  // Auto-clear toast messages
+  useEffect(() => {
+    if (error || successMsg) {
+      const timer = setTimeout(() => {
+        setError(null)
+        setSuccessMsg(null)
+      }, 5000)
+      return () => clearTimeout(timer)
+    }
+  }, [error, successMsg])
 
   useEffect(() => {
     if (selectedYear && selectedSection) {
@@ -347,8 +358,8 @@ export default function AdminSchedule() {
           classSectionId: item.classSectionId || null,
           courseId: item.courseId, day: dropDay, startHour: dropHour, duration: 1,
           roomNumber: defaultRoom || '', courseCode: item.code, courseName: item.name,
-          teacherName: item.teacherName || 'Unassigned', 
-          teachers: item.teachers || [], 
+          teacherName: item.teacherName || 'Unassigned',
+          teachers: item.teachers || [],
           teacherId: (item.teachers && item.teachers.length === 1 && typeof item.teachers[0].id === 'string' && item.teachers[0].id.length > 20) ? item.teachers[0].id : null,
           isSpecial: !!item.isSpecial,
           specialColor: item.specialColor || null
@@ -542,7 +553,7 @@ export default function AdminSchedule() {
           <div className="flex-1 bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl overflow-auto custom-scrollbar relative select-none">
             {loading && <div className="absolute inset-0 flex items-center justify-center bg-white/50 dark:bg-gray-900/50 z-50"><SpiralLoader /></div>}
 
-            <div className="min-w-[900px]">
+            <div className="min-w-[900px] min-h-full flex flex-col">
               {/* Hour headers */}
               <div className="flex border-b border-gray-100 dark:border-gray-800 bg-gray-50/90 dark:bg-gray-800/90 sticky top-0 z-30">
                 <div className="w-20 shrink-0 p-2 text-center text-xs font-medium text-gray-500 border-r border-gray-100 dark:border-gray-800">Day</div>
@@ -555,7 +566,7 @@ export default function AdminSchedule() {
 
               {/* Day rows */}
               {DAYS.map(day => (
-                <div key={day} className="flex border-b border-gray-100 dark:border-gray-800 last:border-b-0" style={{ minHeight: '90px' }}>
+                <div key={day} className="flex-1 flex border-b border-gray-100 dark:border-gray-800 last:border-b-0" style={{ minHeight: '90px' }}>
                   {/* Day label */}
                   <div className="w-20 shrink-0 flex items-center justify-center text-sm font-bold text-gray-700 dark:text-gray-300 border-r border-gray-100 dark:border-gray-800 bg-gray-50/50 dark:bg-gray-800/20">
                     {day.substring(0, 3)}
@@ -573,7 +584,7 @@ export default function AdminSchedule() {
 
                     {/* Placed blocks */}
                     {gridSchedules.filter(s => s.day === day).map(schedule => {
-                      const leftPct = ((schedule.startHour - 8) / TOTAL_HOURS) * 100
+                      const leftPct = ((schedule.startHour - 9) / TOTAL_HOURS) * 100
                       const widthPct = (schedule.duration / TOTAL_HOURS) * 100
                       const colorClass = schedule.isSpecial ? (schedule.specialColor || 'bg-slate-100 dark:bg-slate-800 text-slate-600 dark:text-slate-300 border-slate-300 dark:border-slate-700 border-dashed') : getCourseColor(schedule.courseId)
 
@@ -620,38 +631,38 @@ export default function AdminSchedule() {
                                 {!schedule.isSpecial && (
                                   <div>
                                     <label className="text-xs font-medium text-gray-500 block mb-1">Teacher</label>
-                                      { (schedule.teachers && schedule.teachers.length > 0) ? (
-                                        <select
-                                          value={schedule.teacherId || ''}
-                                          onChange={(e) => {
-                                            const tId = e.target.value;
-                                            const tObj = schedule.teachers.find(t => t.id === tId);
-                                            setGridSchedules(prev => prev.map(s => s.tempId === schedule.tempId ? { ...s, teacherId: tId, teacherName: tObj?.name || '—' } : s));
-                                          }}
-                                          className="w-full px-2.5 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 focus:outline-none focus:border-blue-500"
-                                        >
-                                          <option value="" disabled>Select a teacher</option>
-                                          {schedule.teachers.map(t => (
-                                            <option key={t.id} value={t.id}>{t.name}</option>
-                                          ))}
-                                        </select>
-                                      ) : (
-                                        <select
-                                          value={schedule.teacherId || ''}
-                                          onChange={(e) => {
-                                            const tId = e.target.value;
-                                            const tObj = allTeachers.find(t => t.teacherDetails?.id === tId);
-                                            const tName = tObj ? (tObj.fullName || tObj.full_name || tObj.name) : '—';
-                                            setGridSchedules(prev => prev.map(s => s.tempId === schedule.tempId ? { ...s, teacherId: tId, teacherName: tName } : s));
-                                          }}
-                                          className="w-full px-2.5 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 focus:outline-none focus:border-blue-500"
-                                        >
-                                          <option value="">No teacher assigned</option>
-                                          {allTeachers.map(t => (
-                                            <option key={t.id} value={t.teacherDetails?.id}>{t.fullName || t.full_name || t.name || t.email}</option>
-                                          ))}
-                                        </select>
-                                      )}
+                                    {(schedule.teachers && schedule.teachers.length > 0) ? (
+                                      <select
+                                        value={schedule.teacherId || ''}
+                                        onChange={(e) => {
+                                          const tId = e.target.value;
+                                          const tObj = schedule.teachers.find(t => t.id === tId);
+                                          setGridSchedules(prev => prev.map(s => s.tempId === schedule.tempId ? { ...s, teacherId: tId, teacherName: tObj?.name || '—' } : s));
+                                        }}
+                                        className="w-full px-2.5 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 focus:outline-none focus:border-blue-500"
+                                      >
+                                        <option value="" disabled>Select a teacher</option>
+                                        {schedule.teachers.map(t => (
+                                          <option key={t.id} value={t.id}>{t.name}</option>
+                                        ))}
+                                      </select>
+                                    ) : (
+                                      <select
+                                        value={schedule.teacherId || ''}
+                                        onChange={(e) => {
+                                          const tId = e.target.value;
+                                          const tObj = allTeachers.find(t => t.teacherDetails?.id === tId);
+                                          const tName = tObj ? (tObj.fullName || tObj.full_name || tObj.name) : '—';
+                                          setGridSchedules(prev => prev.map(s => s.tempId === schedule.tempId ? { ...s, teacherId: tId, teacherName: tName } : s));
+                                        }}
+                                        className="w-full px-2.5 py-1.5 text-sm rounded-lg border border-gray-200 dark:border-gray-700 bg-gray-50 dark:bg-gray-900 focus:outline-none focus:border-blue-500"
+                                      >
+                                        <option value="">No teacher assigned</option>
+                                        {allTeachers.map(t => (
+                                          <option key={t.id} value={t.teacherDetails?.id}>{t.fullName || t.full_name || t.name || t.email}</option>
+                                        ))}
+                                      </select>
+                                    )}
                                   </div>
                                 )}
                                 <div>

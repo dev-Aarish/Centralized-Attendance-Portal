@@ -11,6 +11,13 @@ const DEPARTMENTS = [
   { value: 'EE', label: 'Electrical Engineering' },
   { value: 'ME', label: 'Mechanical Engineering' },
   { value: 'CE', label: 'Civil Engineering' },
+  { value: 'AEIE', label: 'Applied Electronics & Instrumentation Engineering' },
+  { value: 'CSBS', label: 'Computer Science & Business Systems' },
+  { value: 'CSDS', label: 'Computer Science & Data Science' },
+  { value: 'AIML', label: 'Artificial Intelligence & Machine Learning' },
+  { value: 'ChE', label: 'Chemical Engineering' },
+  { value: 'Mathematics', label: 'Mathematics' },
+  { value: 'Physics', label: 'Physics' },
 ]
 
 const YEARS = ['1st', '2nd', '3rd', '4th']

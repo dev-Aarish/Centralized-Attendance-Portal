@@ -1,227 +1,243 @@
 import { useState, useEffect } from 'react'
 import AppLayout from '../../components/shared/AppLayout'
 import { apiFetch } from '../../lib/api'
+import { formatCohort } from '../../lib/format'
 
 export default function AdminAssignCourses() {
-  const [teachers, setTeachers] = useState([])
-  const [sections, setSections] = useState([])
-  const [allCohorts, setAllCohorts] = useState([])
-  const [assignments, setAssignments] = useState([])
-  const [loading, setLoading] = useState(false)
-  const [error, setError] = useState(null)
-  const [success, setSuccess] = useState(null)
-  const [selectedTeacher, setSelectedTeacher] = useState('')
-  const [selectedSection, setSelectedSection] = useState('')
-  const [courses, setCourses] = useState([])
-  const [selectedCourse, setSelectedCourse] = useState('')
+  const [teachers, setTeachers] = useState([])
+  const [sections, setSections] = useState([])
+  const [allCohorts, setAllCohorts] = useState([])
+  const [assignments, setAssignments] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [error, setError] = useState(null)
+  const [success, setSuccess] = useState(null)
+  const [selectedTeacher, setSelectedTeacher] = useState('')
+  const [selectedSection, setSelectedSection] = useState('')
+  const [courses, setCourses] = useState([])
+  const [selectedCourse, setSelectedCourse] = useState('')
 
-  useEffect(() => {
-    fetchTeachers()
-    fetchCourses()
-    fetchCohorts()
-  }, [])
+  useEffect(() => {
+    fetchTeachers()
+    fetchCourses()
+    fetchCohorts()
+  }, [])
 
-  useEffect(() => {
-    if (selectedTeacher) {
-      fetchTeacherAssignments()
-    }
-  }, [selectedTeacher])
+  // Auto-clear toast messages
+  useEffect(() => {
+    if (error || success) {
+      const timer = setTimeout(() => {
+        setError(null)
+        setSuccess(null)
+      }, 5000)
+      return () => clearTimeout(timer)
+    }
+  }, [error, success])
 
-  useEffect(() => {
-    if (selectedCourse) {
-      fetchSections()
-    }
-  }, [selectedCourse])
+  useEffect(() => {
+    if (selectedTeacher) {
+      fetchTeacherAssignments()
+    }
+  }, [selectedTeacher])
 
-  async function fetchTeachers() {
-    try {
-      const data = await apiFetch('/api/v1/admin/users?role=teacher')
-      setTeachers(data.data || [])
-    } catch (err) {
-      setError(err.message)
-    }
-  }
+  useEffect(() => {
+    if (selectedCourse) {
+      fetchSections()
+    }
+  }, [selectedCourse])
 
-  async function fetchCohorts() {
-    try {
-      const data = await apiFetch('/api/v1/admin/cohorts')
-      setAllCohorts(data.data || [])
-    } catch (err) {
-      console.error('Error fetching cohorts:', err)
-    }
-  }
+  async function fetchTeachers() {
+    try {
+      const data = await apiFetch('/api/v1/admin/users?role=teacher')
+      setTeachers(data.data || [])
+    } catch (err) {
+      setError(err.message)
+    }
+  }
 
-  async function fetchCourses() {
-    try {
-      const data = await apiFetch('/api/v1/admin/courses')
-      const filtered = (data.data || []).filter(c => !['LIB', 'REM', 'LUNCH'].includes((c.code || '').trim().toUpperCase()))
-      setCourses(filtered)
-    } catch (err) {
-      console.error('Error fetching courses:', err)
-    }
-  }
+  async function fetchCohorts() {
+    try {
+      const data = await apiFetch('/api/v1/admin/cohorts')
+      const formatted = (data.data || []).map(c => ({
+        ...c,
+        label: formatCohort(c.department, c.yearOfStudy, c.section)
+      }))
+      setAllCohorts(formatted)
+    } catch (err) {
+      console.error('Error fetching cohorts:', err)
+    }
+  }
 
-  async function fetchSections() {
-    try {
-      if (selectedCourse) {
-        const data = await apiFetch(`/api/v1/admin/courses/${selectedCourse}/sections`)
-        setSections(data.data || [])
-      }
-    } catch (err) {
-      console.error('Error fetching sections:', err)
-    }
-  }
+  async function fetchCourses() {
+    try {
+      const data = await apiFetch('/api/v1/admin/courses')
+      const filtered = (data.data || []).filter(c => !['LIB', 'REM', 'LUNCH'].includes((c.code || '').trim().toUpperCase()))
+      setCourses(filtered)
+    } catch (err) {
+      console.error('Error fetching courses:', err)
+    }
+  }
 
-  async function fetchTeacherAssignments() {
-    try {
-    const data = await apiFetch(
-    `/api/v1/admin/teacher-assignments?teacherId=${selectedTeacher}`
-    )
-    setAssignments(data.data || [])
-    setError(null)
-  } catch (err) {
-    setError(err.message)
-  }
-  }
+  async function fetchSections() {
+    try {
+      if (selectedCourse) {
+        const data = await apiFetch(`/api/v1/admin/courses/${selectedCourse}/sections`)
+        setSections(data.data || [])
+      }
+    } catch (err) {
+      console.error('Error fetching sections:', err)
+    }
+  }
 
-  async function handleAssignCourse() {
-    if (!selectedTeacher || !selectedSection) return
+  async function fetchTeacherAssignments() {
+    try {
+      const data = await apiFetch(
+        `/api/v1/admin/teacher-assignments?teacherId=${selectedTeacher}`
+      )
+      setAssignments(data.data || [])
+      setError(null)
+    } catch (err) {
+      setError(err.message)
+    }
+  }
 
-    try {
-      setLoading(true)
-      
-      const isCohort = selectedSection.startsWith('cohort-')
-      const payload = {
-        teacherId: selectedTeacher,
-      }
+  async function handleAssignCourse() {
+    if (!selectedTeacher || !selectedSection) return
 
-      if (isCohort) {
-        const cohortIndex = parseInt(selectedSection.replace('cohort-', ''), 10)
-        payload.cohort = allCohorts[cohortIndex]
-        payload.courseId = selectedCourse
-      } else {
-        payload.sectionId = selectedSection
-      }
+    try {
+      setLoading(true)
 
-      await apiFetch(`/api/v1/admin/teacher-assignments`, {
-        method: 'POST',
-        body: JSON.stringify(payload),
-      })
+      const isCohort = selectedSection.startsWith('cohort-')
+      const payload = {
+        teacherId: selectedTeacher,
+      }
 
-      setSelectedSection('')
-      setSelectedCourse('')
-      setError(null)
-      setSuccess('Course assigned to teacher successfully!')
-      setTimeout(() => setSuccess(null), 3000)
+      if (isCohort) {
+        const cohortIndex = parseInt(selectedSection.replace('cohort-', ''), 10)
+        payload.cohort = allCohorts[cohortIndex]
+        payload.courseId = selectedCourse
+      } else {
+        payload.sectionId = selectedSection
+      }
 
-      await fetchTeacherAssignments()
-    } catch (err) {
-      setError(err.message)
-    } finally {
-      setLoading(false)
-    }
-  }
+      await apiFetch(`/api/v1/admin/teacher-assignments`, {
+        method: 'POST',
+        body: JSON.stringify(payload),
+      })
 
-  async function handleRemoveAssignment(assignmentId) {
-    if (!window.confirm('Remove this assignment?')) return
+      setSelectedSection('')
+      setSelectedCourse('')
+      setError(null)
+      setSuccess('Course assigned to teacher successfully!')
+      setTimeout(() => setSuccess(null), 3000)
 
-    try {
-      await apiFetch(`/api/v1/admin/teacher-assignments/${assignmentId}`, {
-        method: 'DELETE',
-      })
-      await fetchTeacherAssignments()
-    } catch (err) {
-      setError(err.message)
-      console.error('Error removing assignment:', err)
-    }
-  }
+      await fetchTeacherAssignments()
+    } catch (err) {
+      setError(err.message)
+    } finally {
+      setLoading(false)
+    }
+  }
 
-  return (
-    <AppLayout title="Assign Courses to Teachers">
-      <div style={{ width: '100%' }} className="flex flex-col gap-6">
-        <div>
-          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
-            Assign Courses to Teachers
-          </h2>
-          <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
-            Link teachers to course sections
-          </p>
-        </div>
+  async function handleRemoveAssignment(assignmentId) {
+    if (!window.confirm('Remove this assignment?')) return
 
-        {success && (
-          <div className="bg-green-50 dark:bg-green-950/20 border border-green-100 dark:border-green-900/30 rounded-xl px-4 py-3">
-            <p className="text-sm text-green-600 dark:text-green-400">{success}</p>
-          </div>
-        )}
+    try {
+      await apiFetch(`/api/v1/admin/teacher-assignments/${assignmentId}`, {
+        method: 'DELETE',
+      })
+      await fetchTeacherAssignments()
+    } catch (err) {
+      setError(err.message)
+      console.error('Error removing assignment:', err)
+    }
+  }
 
-        {error && (
-          <div className="bg-red-50 dark:bg-red-950/20 border border-red-100 dark:border-red-900/30 rounded-xl px-4 py-3">
-            <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
-          </div>
-        )}
+  return (
+    <AppLayout title="Assign Courses to Teachers">
+      <div style={{ width: '100%' }} className="flex flex-col gap-6">
+        <div>
+          <h2 className="text-lg font-semibold text-gray-900 dark:text-white">
+            Assign Courses to Teachers
+          </h2>
+          <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">
+            Link teachers to course sections
+          </p>
+        </div>
 
-        {/* Teacher Selection */}
-        <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl px-5 py-4 space-y-4">
-          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-            Step 1: Select Teacher
-          </h3>
-          <select
-            value={selectedTeacher}
-            onChange={(e) => setSelectedTeacher(e.target.value)}
-            className="w-full px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="">-- Select Teacher --</option>
-            {teachers.map((teacher) => (
-              <option key={teacher.id} value={teacher.id}>
-                {teacher.fullName} ({teacher.email})
-              </option>
-            ))}
-          </select>
-        </div>
+        {success && (
+          <div className="bg-green-50 dark:bg-green-950/20 border border-green-100 dark:border-green-900/30 rounded-xl px-4 py-3">
+            <p className="text-sm text-green-600 dark:text-green-400">{success}</p>
+          </div>
+        )}
 
-        {selectedTeacher && (
-          <>
-            {/* Course & Section Selection */}
-            <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl px-5 py-4 space-y-4">
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
-                Step 2: Select Course & Section
-              </h3>
-              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-                <div>
-                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                    Course
-                  </label>
-                  <select
-                    value={selectedCourse}
-                    onChange={(e) => setSelectedCourse(e.target.value)}
-                    className="w-full mt-2 px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-                  >
-                    <option value="">Select Course</option>
-                    {courses.map((course) => (
-                      <option key={course.id} value={course.id}>
-                        {course.code} - {course.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
+        {error && (
+          <div className="bg-red-50 dark:bg-red-950/20 border border-red-100 dark:border-red-900/30 rounded-xl px-4 py-3">
+            <p className="text-sm text-red-600 dark:text-red-400">{error}</p>
+          </div>
+        )}
 
-                <div>
-                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
-                    Section
-                  </label>
-                  <select
-                    value={selectedSection}
-                    onChange={(e) => setSelectedSection(e.target.value)}
-                    disabled={!selectedCourse}
-                    className="w-full mt-2 px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
-                  >
-                    <option value="">Select Offering</option>
-                    
+        {/* Teacher Selection */}
+        <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl px-5 py-4 space-y-4">
+          <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
+            Step 1: Select Teacher
+          </h3>
+          <select
+            value={selectedTeacher}
+            onChange={(e) => setSelectedTeacher(e.target.value)}
+            className="w-full px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+          >
+            <option value="">-- Select Teacher --</option>
+            {teachers.map((teacher) => (
+              <option key={teacher.id} value={teacher.id}>
+                {teacher.fullName} ({teacher.email})
+              </option>
+            ))}
+          </select>
+        </div>
+
+        {selectedTeacher && (
+          <>
+            {/* Course & Section Selection */}
+            <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl px-5 py-4 space-y-4">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-white">
+                Step 2: Select Course & Section
+              </h3>
+              <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                <div>
+                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                    Course
+                  </label>
+                  <select
+                    value={selectedCourse}
+                    onChange={(e) => setSelectedCourse(e.target.value)}
+                    className="w-full mt-2 px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Select Course</option>
+                    {courses.map((course) => (
+                      <option key={course.id} value={course.id}>
+                        {course.code} - {course.name}
+                      </option>
+                    ))}
+                  </select>
+                </div>
+
+                <div>
+                  <label className="text-xs font-medium text-gray-600 dark:text-gray-400">
+                    Section
+                  </label>
+                  <select
+                    value={selectedSection}
+                    onChange={(e) => setSelectedSection(e.target.value)}
+                    disabled={!selectedCourse}
+                    className="w-full mt-2 px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500 disabled:opacity-50"
+                  >
+                    <option value="">Select Offering</option>
+
                     {sections.length > 0 && (
                       <optgroup label="Existing Offerings">
                         {sections.map((section) => (
                           <option key={section.id} value={section.id}>
-                            Section {section.section} (Year {section.yearOfStudy}) - {section.department}
+                            {formatCohort(section.department, section.yearOfStudy, section.section)}
                           </option>
                         ))}
                       </optgroup>
@@ -233,17 +249,17 @@ export default function AdminAssignCourses() {
                           if (!selectedCourse) return false
                           const course = courses.find(cc => cc.id === selectedCourse)
                           if (!course) return false
-                          
+
                           const targetYear = Math.ceil((course.semester || 1) / 2)
                           const deptMatch = c.department.trim().toUpperCase() === course.department.trim().toUpperCase()
                           const yearMatch = parseInt(c.yearOfStudy, 10) === targetYear
-                          
+
                           if (!deptMatch || !yearMatch) return false
 
                           // Also check if already in existing offerings
-                          return !sections.some(s => 
-                            s.section === c.section && 
-                            s.yearOfStudy === c.yearOfStudy && 
+                          return !sections.some(s =>
+                            s.section === c.section &&
+                            s.yearOfStudy === c.yearOfStudy &&
                             s.department === c.department
                           )
                         })
@@ -257,60 +273,60 @@ export default function AdminAssignCourses() {
                           )
                         })}
                     </optgroup>
-                  </select>
-        </div>
-        </div>
-        <button
-          onClick={handleAssignCourse}
-                  disabled={loading || !selectedSection}
-                  className="w-full px-4 py-2.5 rounded-xl bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium transition-colors disabled:opacity-50"
-               >
-                {loading ? 'Assigning...' : 'Assign Course'}
-              </button>
-            </div>
+                  </select>
+                </div>
+              </div>
+              <button
+                onClick={handleAssignCourse}
+                disabled={loading || !selectedSection}
+                className="w-full px-4 py-2.5 rounded-xl bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium transition-colors disabled:opacity-50"
+              >
+                {loading ? 'Assigning...' : 'Assign Course'}
+              </button>
+            </div>
 
-            {/* Current Assignments */}
-            <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl px-5 py-4">
-              <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
-                Current Assignments
-              </h3>
+            {/* Current Assignments */}
+            <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl px-5 py-4">
+              <h3 className="text-sm font-semibold text-gray-900 dark:text-white mb-4">
+                Current Assignments
+              </h3>
 
-              {assignments.length === 0 ? (
-                <p className="text-sm text-gray-400 dark:text-gray-500">
-                  No assignments for this teacher yet.
-                </p>
-              ) : (
-                <div className="space-y-3">
-                  {assignments.map((assignment) => (
-                    <div
-                      key={assignment.id}
-                      className="flex items-start justify-between bg-gray-50 dark:bg-gray-800 rounded-xl px-4 py-3 border border-gray-100 dark:border-gray-700"
-                    >
-                      <div>
-                        <p className="font-medium text-gray-900 dark:text-white">
-                          {assignment.course?.code} - {assignment.course?.name}
-                        </p>
-                        <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                          Section {assignment.section} • Year {assignment.yearOfStudy}
-                        </p>
-                        <p className="text-xs text-gray-500 dark:text-gray-500 mt-0.5">
-                          Students: {assignment.studentsEnrolled}
-                        </p>
-                      </div>
-                      <button
-                        onClick={() => handleRemoveAssignment(assignment.id)}
-                        className="text-xs text-red-600 dark:text-red-400 hover:underline"
-                      >
-                        Remove
-                      </button>
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </>
-        )}
-      </div>
-    </AppLayout>
-  )
+              {assignments.length === 0 ? (
+                <p className="text-sm text-gray-400 dark:text-gray-500">
+                  No assignments for this teacher yet.
+                </p>
+              ) : (
+                <div className="space-y-3">
+                  {assignments.map((assignment) => (
+                    <div
+                      key={assignment.id}
+                      className="flex items-start justify-between bg-gray-50 dark:bg-gray-800 rounded-xl px-4 py-3 border border-gray-100 dark:border-gray-700"
+                    >
+                      <div>
+                        <p className="font-medium text-gray-900 dark:text-white">
+                          {assignment.course?.code} - {assignment.course?.name}
+                        </p>
+                        <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                          {formatCohort(assignment.department, assignment.yearOfStudy, assignment.section)}
+                        </p>
+                        <p className="text-xs text-gray-500 dark:text-gray-500 mt-0.5">
+                          Students: {assignment.studentsEnrolled}
+                        </p>
+                      </div>
+                      <button
+                        onClick={() => handleRemoveAssignment(assignment.id)}
+                        className="text-xs text-red-600 dark:text-red-400 hover:underline"
+                      >
+                        Remove
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          </>
+        )}
+      </div>
+    </AppLayout>
+  )
 }

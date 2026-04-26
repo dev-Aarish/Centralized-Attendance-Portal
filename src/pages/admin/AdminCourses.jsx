@@ -7,7 +7,7 @@ export default function AdminCourses() {
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [showForm, setShowForm] = useState(false)
-  const [formData, setFormData] = useState({ code: '', name: '', department: '', semester: 1, type: 'Lecture' })
+  const [formData, setFormData] = useState({ code: '', name: '', department: '', semester: '', type: 'Lecture' })
   const [submitting, setSubmitting] = useState(false)
 
   useEffect(() => {
@@ -28,7 +28,7 @@ export default function AdminCourses() {
   }
 
   async function handleCreateCourse() {
-    if (!formData.code || !formData.name || !formData.department) {
+    if (!formData.code || !formData.name || !formData.department || !formData.semester) {
       setError('All fields are required')
       return
     }
@@ -39,7 +39,7 @@ export default function AdminCourses() {
         method: 'POST',
         body: JSON.stringify(formData),
       })
-      setFormData({ code: '', name: '', department: '', semester: 1, type: 'Lecture' })
+      setFormData({ code: '', name: '', department: '', semester: '', type: 'Lecture' })
       setShowForm(false)
       setError(null)
       await fetchCourses()
@@ -141,6 +141,13 @@ export default function AdminCourses() {
                 <option value="EE">EE</option>
                 <option value="ME">ME</option>
                 <option value="CE">CE</option>
+                <option value="AEIE">AEIE</option>
+                <option value="CSBS">CSBS</option>
+                <option value="CSDS">CSDS</option>
+                <option value="AIML">AIML</option>
+                <option value="ChE">ChE</option>
+                <option value="Mathematics">Mathematics</option>
+                <option value="Physics">Physics</option>
               </select>
               <input
                 type="number"
@@ -148,7 +155,7 @@ export default function AdminCourses() {
                 max="8"
                 placeholder="Semester"
                 value={formData.semester}
-                onChange={(e) => setFormData({ ...formData, semester: parseInt(e.target.value) })}
+                onChange={(e) => setFormData({ ...formData, semester: e.target.value ? parseInt(e.target.value) : '' })}
                 className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
               />
             </div>

@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react'
 import AppLayout from '../../components/shared/AppLayout'
 import { apiFetch } from '../../lib/api'
+import { formatCohort } from '../../lib/format'
 
 export default function AdminAlerts() {
   const [alerts, setAlerts] = useState([])
@@ -133,7 +134,7 @@ export default function AdminAlerts() {
                     <div className="flex-1">
                       <p className={`font-semibold ${textClasses[color]}`}>{alert.name}</p>
                       <p className="text-xs text-gray-500 dark:text-gray-400 mt-1">
-                        Roll: {alert.rollNumber} • {alert.department} • Year {alert.yearOfStudy}
+                        Roll: {alert.rollNumber} • {formatCohort(alert.department, alert.yearOfStudy)}
                       </p>
                       <p className="text-xs text-gray-500 dark:text-gray-400 mt-0.5">{alert.email}</p>
                     </div>
