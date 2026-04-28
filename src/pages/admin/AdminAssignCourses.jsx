@@ -9,6 +9,7 @@ export default function AdminAssignCourses() {
   const [sections, setSections] = useState([])
   const [allCohorts, setAllCohorts] = useState([])
   const [assignments, setAssignments] = useState([])
+  const [selectedAssignments, setSelectedAssignments] = useState([])
   const [loading, setLoading] = useState(false)
   const [error, setError] = useState(null)
   const [success, setSuccess] = useState(null)
@@ -98,6 +99,7 @@ export default function AdminAssignCourses() {
         `/api/v1/admin/teacher-assignments?teacherId=${selectedTeacher}`
       )
       setAssignments(data.data || [])
+      setSelectedAssignments([])
       setError(null)
     } catch (err) {
       setError(err.message)
@@ -178,6 +180,42 @@ export default function AdminAssignCourses() {
     } catch (err) {
       setError(err.message)
       console.error('Error removing assignment:', err)
+    }
+  }
+
+  async function handleRemoveSelected() {
+    if (!selectedAssignments || selectedAssignments.length === 0) return
+    if (!window.confirm(`Remove ${selectedAssignments.length} selected assignment(s)?`)) return
+
+    try {
+      setLoading(true)
+      await Promise.all(
+        selectedAssignments.map(id => apiFetch(`/api/v1/admin/teacher-assignments/${id}`, { method: 'DELETE' }))
+      )
+      setSuccess('Selected assignments removed')
+      setError(null)
+      setSelectedAssignments([])
+      await fetchTeacherAssignments()
+    } catch (err) {
+      setError(err.message)
+      console.error('Error removing selected assignments:', err)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  function toggleSelectAssignment(id) {
+    setSelectedAssignments(prev => {
+      if (prev.includes(id)) return prev.filter(x => x !== id)
+      return [...prev, id]
+    })
+  }
+
+  function selectAllAssignments() {
+    if (selectedAssignments.length === assignments.length) {
+      setSelectedAssignments([])
+    } else {
+      setSelectedAssignments(assignments.map(a => a.id))
     }
   }
 
@@ -331,21 +369,53 @@ export default function AdminAssignCourses() {
                 </p>
               ) : (
                 <div className="space-y-3">
+                  <div className="flex items-center justify-between mb-2">
+                    <div className="flex items-center gap-3">
+                      <label className="inline-flex items-center text-sm text-gray-700 dark:text-gray-300">
+                        <input
+                          type="checkbox"
+                          checked={selectedAssignments.length === assignments.length}
+                          onChange={selectAllAssignments}
+                          className="mr-2"
+                        />
+                        Select All
+                      </label>
+                      <span className="text-xs text-gray-500">({assignments.length} assignment{assignments.length > 1 ? 's' : ''})</span>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <button
+                        onClick={handleRemoveSelected}
+                        disabled={selectedAssignments.length === 0 || loading}
+                        className="text-xs text-red-600 dark:text-red-400 hover:underline disabled:opacity-50"
+                      >
+                        Remove Selected
+                      </button>
+                    </div>
+                  </div>
+
                   {assignments.map((assignment) => (
                     <div
                       key={assignment.id}
                       className="flex items-start justify-between bg-gray-50 dark:bg-gray-800 rounded-xl px-4 py-3 border border-gray-100 dark:border-gray-700"
                     >
-                      <div>
-                        <p className="font-medium text-gray-900 dark:text-white">
-                          {assignment.course?.code} - {assignment.course?.name}
-                        </p>
-                        <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
-                          {formatCohort(assignment.department, assignment.yearOfStudy, assignment.section)}
-                        </p>
-                        <p className="text-xs text-gray-500 dark:text-gray-500 mt-0.5">
-                          Students: {assignment.studentsEnrolled}
-                        </p>
+                      <div className="flex items-start gap-3">
+                        <input
+                          type="checkbox"
+                          checked={selectedAssignments.includes(assignment.id)}
+                          onChange={() => toggleSelectAssignment(assignment.id)}
+                          className="mt-1"
+                        />
+                        <div>
+                          <p className="font-medium text-gray-900 dark:text-white">
+                            {assignment.course?.code} - {assignment.course?.name}
+                          </p>
+                          <p className="text-xs text-gray-600 dark:text-gray-400 mt-1">
+                            {formatCohort(assignment.department, assignment.yearOfStudy, assignment.section)}
+                          </p>
+                          <p className="text-xs text-gray-500 dark:text-gray-500 mt-0.5">
+                            Students: {assignment.studentsEnrolled}
+                          </p>
+                        </div>
                       </div>
                       <button
                         onClick={() => handleRemoveAssignment(assignment.id)}

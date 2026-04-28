@@ -56,6 +56,21 @@ export default function AdminSchedule() {
   const [actionWarning, setActionWarning] = useState(null)
   const editPopoverRef = useRef(null)
   const trackRefs = useRef({})
+  const [modalOpen, setModalOpen] = useState(false)
+  const [modalTitle, setModalTitle] = useState('')
+  const [modalBody, setModalBody] = useState(null)
+
+  function openModal(title, body) {
+    setModalTitle(title || '')
+    setModalBody(body || null)
+    setModalOpen(true)
+  }
+
+  function closeModal() {
+    setModalOpen(false)
+    setModalTitle('')
+    setModalBody(null)
+  }
 
   // Fetch all courses and sections on mount
   useEffect(() => {
@@ -618,6 +633,24 @@ export default function AdminSchedule() {
             </div>
           )}
         </div>
+
+        {/* Centered modal popout with bokeh backdrop */}
+        {modalOpen && (
+          <div className="fixed inset-0 z-[9998] flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={closeModal} />
+            <div className="relative z-50 w-[min(92%,900px)] max-h-[85vh] overflow-auto bg-white dark:bg-gray-900 rounded-2xl shadow-2xl p-6 m-4">
+              <div className="flex items-start justify-between">
+                <div>
+                  <h3 className="text-lg font-semibold text-gray-900 dark:text-white">{modalTitle}</h3>
+                </div>
+                <button onClick={closeModal} className="text-gray-500 hover:text-gray-700 dark:hover:text-gray-300 ml-4">✕</button>
+              </div>
+              <div className="mt-4 text-sm text-gray-700 dark:text-gray-300">
+                {modalBody}
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Zone 1: Top Control Bar */}
         <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl p-3 flex flex-col xl:flex-row gap-4 justify-between items-start xl:items-center shrink-0 shadow-sm">
