@@ -135,7 +135,8 @@ router.get('/student', async (req, res) => {
           courses (
             id,
             name,
-            code
+            code,
+            type
           )
         )
       `)
