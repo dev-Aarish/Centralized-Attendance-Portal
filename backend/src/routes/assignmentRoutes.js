@@ -584,6 +584,69 @@ router.get('/sections/:id', async (req, res) => {
     // Get assignments for this section
     let assignments = null
     let error = null
+    const submissionCountsByAssignment = new Map()
+
+    const { data: sectionStudents, error: sectionStudentsError } = await req.supabase
+      .from('enrollments')
+      .select('student_id')
+      .eq('class_section_id', classSectionId)
+
+    if (sectionStudentsError) {
+      return res.status(500).json({ error: sectionStudentsError.message })
+    }
+
+    const studentIds = Array.from(new Set((sectionStudents || [])
+      .map((row) => row.student_id)
+      .filter(Boolean)))
+
+    const { data: sessionRows, error: sessionError } = await req.supabase
+      .from('attendance_sessions')
+      .select('id')
+      .eq('class_section_id', classSectionId)
+
+    if (sessionError) {
+      return res.status(500).json({ error: sessionError.message })
+    }
+
+    const sessionIds = (sessionRows || []).map((row) => row.id)
+    const attendanceByStudent = new Map()
+
+    if (studentIds.length > 0 && sessionIds.length > 0) {
+      const { data: attendanceRows, error: attendanceError } = await req.supabase
+        .from('attendance_records')
+        .select('student_id, session_id, status')
+        .in('student_id', studentIds)
+        .in('session_id', sessionIds)
+
+      if (attendanceError) {
+        return res.status(500).json({ error: attendanceError.message })
+      }
+
+      const attendanceMap = new Map()
+      for (const row of attendanceRows || []) {
+        if (!row?.student_id || !row?.session_id) continue
+        attendanceMap.set(`${row.student_id}:${row.session_id}`, row.status)
+      }
+
+      for (const studentId of studentIds) {
+        let attended = 0
+        let total = 0
+
+        for (const sessionId of sessionIds) {
+          total += 1
+          const status = attendanceMap.get(`${studentId}:${sessionId}`) || 'absent'
+          if (status === 'present' || status === 'late') {
+            attended += 1
+          }
+        }
+
+        attendanceByStudent.set(studentId, {
+          attended,
+          total,
+          percentage: total > 0 ? (attended / total) * 100 : 0,
+        })
+      }
+    }
 
     const sectionAssignmentsQuery = await req.supabase
       .from('assignments')
@@ -629,18 +692,52 @@ router.get('/sections/:id', async (req, res) => {
       return res.status(500).json({ error: error.message })
     }
 
-    const data = assignments.map((a) => ({
-      id: a.id,
-      title: a.title,
-      description: a.description,
-      questionCount: a.question_count,
-      attendanceThreshold: Number.isFinite(Number(a.attendance_threshold))
+    const assignmentIds = assignments.map((item) => item.id).filter(Boolean)
+    if (assignmentIds.length > 0) {
+      const { data: submissionRows, error: submissionError } = await supabaseAdmin
+        .from('assignment_submissions')
+        .select('assignment_id, student_id')
+        .in('assignment_id', assignmentIds)
+
+      if (submissionError) {
+        return res.status(500).json({ error: submissionError.message })
+      }
+
+      for (const row of submissionRows || []) {
+        if (!row?.assignment_id || !row?.student_id) continue
+        if (!submissionCountsByAssignment.has(row.assignment_id)) {
+          submissionCountsByAssignment.set(row.assignment_id, new Set())
+        }
+        submissionCountsByAssignment.get(row.assignment_id).add(row.student_id)
+      }
+    }
+
+    const data = assignments.map((a) => {
+      const attendanceThreshold = Number.isFinite(Number(a.attendance_threshold))
         ? Number(a.attendance_threshold)
-        : DEFAULT_ASSIGNMENT_ATTENDANCE_THRESHOLD,
-      dueAt: a.due_at,
-      createdAt: a.created_at,
-      questionsLinked: a.assignment_questions?.[0]?.count || 0,
-    }))
+        : DEFAULT_ASSIGNMENT_ATTENDANCE_THRESHOLD
+
+      const eligibleStudentIds = Array.from(attendanceByStudent.entries())
+        .filter(([, stats]) => stats.percentage >= attendanceThreshold)
+        .map(([studentId]) => studentId)
+
+      const eligibleStudentSet = new Set(eligibleStudentIds)
+      const submissionSet = submissionCountsByAssignment.get(a.id) || new Set()
+      const totalSubmissions = Array.from(submissionSet).filter((studentId) => eligibleStudentSet.has(studentId)).length
+
+      return {
+        id: a.id,
+        title: a.title,
+        description: a.description,
+        questionCount: a.question_count,
+        attendanceThreshold,
+        eligibleStudents: eligibleStudentIds.length,
+        totalSubmissions,
+        dueAt: a.due_at,
+        createdAt: a.created_at,
+        questionsLinked: a.assignment_questions?.[0]?.count || 0,
+      }
+    })
 
     return res.json({ data })
   } catch (err) {

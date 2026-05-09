@@ -292,9 +292,17 @@ export default function TeacherAssignments() {
                           <p className="text-xs text-gray-400">
                             {(a.questionCount ?? a.question_count ?? 0)} questions · Created {new Date(a.createdAt || a.created_at).toDateString()}
                           </p>
-                          <p className="text-xs text-gray-500 dark:text-gray-400 mr-3">
-                            Min attendance: {a.attendanceThreshold ?? 75}%
-                          </p>
+                          <div className="flex flex-wrap items-center gap-4 mr-3 text-xs text-gray-500 dark:text-gray-400">
+                            <p>
+                              Min attendance: {a.attendanceThreshold ?? 75}%
+                            </p>
+                            <p>
+                              Eligible Students: {a.eligibleStudents ?? 0}
+                            </p>
+                            <p>
+                              Total Submissions: {a.totalSubmissions ?? 0}
+                            </p>
+                          </div>
                           <button
                             onClick={() => loadSubmissions(a.id)}
                             className="text-xs px-3 py-1.5 rounded-lg bg-indigo-50 dark:bg-indigo-900/30 text-indigo-600 dark:text-indigo-400 font-medium hover:bg-indigo-100 dark:hover:bg-indigo-900/50 transition-colors shrink-0"
