@@ -1034,16 +1034,29 @@ router.post('/:id/submit', upload.single('file'), async (req, res) => {
 
     if (!studentProfile) return res.status(403).json({ error: 'Student profile not found' })
 
-    const { data: existingSubmission } = await supabaseAdmin
+    const { data: assignment, error: assignmentError } = await req.supabase
+      .from('assignments')
+      .select('id, due_at')
+      .eq('id', assignmentId)
+      .single()
+
+    if (assignmentError || !assignment) {
+      return res.status(404).json({ error: 'Assignment not found' })
+    }
+
+    if (assignment.due_at) {
+      const dueAt = new Date(assignment.due_at)
+      if (Number.isFinite(dueAt.getTime()) && Date.now() > dueAt.getTime()) {
+        return res.status(400).json({ error: 'Assignment deadline has passed.' })
+      }
+    }
+
+    const { data: existingSubmissionDetails } = await supabaseAdmin
       .from('assignment_submissions')
-      .select('id')
+      .select('id, file_url')
       .eq('student_id', studentProfile.id)
       .eq('assignment_id', assignmentId)
       .single()
-
-    if (existingSubmission) {
-      return res.status(400).json({ error: 'You have already submitted an answer for this assignment.' })
-    }
 
     const filePath = `${assignmentId}/${studentProfile.id}/${Date.now()}_${file.originalname.replace(/[^a-zA-Z0-9.-]/g, '_')}`
 
@@ -1055,16 +1068,36 @@ router.post('/:id/submit', upload.single('file'), async (req, res) => {
 
     if (uploadError) return res.status(400).json({ error: uploadError.message })
 
-    const { error: insertError } = await supabaseAdmin
-      .from('assignment_submissions')
-      .insert({
-        student_id: studentProfile.id,
-        assignment_id: assignmentId,
-        file_url: filePath
-      })
+    if (existingSubmissionDetails) {
+      const { error: updateError } = await supabaseAdmin
+        .from('assignment_submissions')
+        .update({
+          file_url: filePath,
+          submitted_at: new Date().toISOString(),
+        })
+        .eq('id', existingSubmissionDetails.id)
 
-    if (insertError) {
-      return res.status(400).json({ error: 'Failed to record submission in database' })
+      if (updateError) {
+        return res.status(400).json({ error: 'Failed to update submission in database' })
+      }
+
+      if (existingSubmissionDetails.file_url) {
+        await supabaseAdmin.storage
+          .from('submissions')
+          .remove([existingSubmissionDetails.file_url])
+      }
+    } else {
+      const { error: insertError } = await supabaseAdmin
+        .from('assignment_submissions')
+        .insert({
+          student_id: studentProfile.id,
+          assignment_id: assignmentId,
+          file_url: filePath
+        })
+
+      if (insertError) {
+        return res.status(400).json({ error: 'Failed to record submission in database' })
+      }
     }
 
     return res.json({ success: true, message: 'Assignment submitted successfully!' })
