@@ -3,7 +3,10 @@ import { apiFetch } from './api'
 export async function getAnnouncements() {
   try {
     const result = await apiFetch('/api/v1/announcements', {
-      cache: false,
+      cache: true,
+      cacheTtlMs: 60 * 1000,
+      staleWindowMs: 2 * 60 * 1000,
+      staleWhileRevalidate: true
     })
     return { data: result.data || [], error: null }
   } catch (err) {

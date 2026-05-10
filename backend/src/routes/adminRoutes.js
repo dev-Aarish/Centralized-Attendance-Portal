@@ -295,6 +295,9 @@ router.get('/users', async (req, res) => {
 
     if (role) {
       query = query.eq('role', role)
+    } else {
+      // Exclude soft-deleted users when no specific role is selected
+      query = query.not('role', 'is', null)
     }
 
     const { data, error } = await query.order('created_at', { ascending: false })

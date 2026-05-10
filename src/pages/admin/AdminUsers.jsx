@@ -55,11 +55,17 @@ export default function AdminUsers() {
   async function handleDeleteUser(id) {
     if (!window.confirm('Are you sure you want to delete this user?')) return
 
+    // Optimistic UI Update: hide the user instantly
+    setUsers((prev) => prev.filter((u) => u.id !== id))
+
     try {
       await apiFetch(`/api/v1/admin/users/${id}`, { method: 'DELETE' })
-      await fetchUsers()
+      // fetch in background to sync
+      fetchUsers()
     } catch (err) {
       setError(err.message || 'Failed to delete user')
+      // Revert on error
+      await fetchUsers()
     }
   }
 

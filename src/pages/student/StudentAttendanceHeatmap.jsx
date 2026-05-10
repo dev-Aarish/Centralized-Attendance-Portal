@@ -230,7 +230,7 @@ export default function StudentAttendanceHeatmap() {
 
   return (
     <AppLayout title="Attendance Heatmap">
-      <div className="min-h-full bg-[#101114] p-3 md:p-5">
+      <div className="min-h-full p-3 md:p-5">
         <div className="mx-auto max-w-4xl space-y-4 text-white">
         <div className="rounded-[2rem] bg-[#151515] p-4 md:p-5 border border-white/5 shadow-[0_24px_80px_rgba(0,0,0,0.38)] flex flex-col gap-4 md:flex-row md:items-end md:justify-between relative overflow-hidden">
           <div className="absolute inset-x-0 top-0 h-1 bg-gradient-to-r from-transparent via-[#8fa8ff]/70 to-transparent" />
@@ -321,8 +321,8 @@ export default function StudentAttendanceHeatmap() {
 
               <div className="rounded-[1.6rem] border border-white/5 bg-[#1b1b1b] p-3.5 md:p-4">
                 <div className="grid grid-cols-7 gap-1.5 md:gap-2 mb-3 text-center text-[10px] font-semibold tracking-[0.28em] text-white/30">
-                  {weekdayLabels.map((label) => (
-                    <div key={label}>{label}</div>
+                  {weekdayLabels.map((label, index) => (
+                    <div key={`${label}-${index}`}>{label}</div>
                   ))}
                 </div>
 
@@ -352,9 +352,7 @@ export default function StudentAttendanceHeatmap() {
                         <span className={`text-[0.62rem] leading-none font-bold ${hasClass ? 'text-white/85' : 'text-white/18'}`}>
                           {hasClass ? `${day.percentage}%` : ' '}
                         </span>
-                        {hasClass && selectedDateKey !== dateKey && (
-                          <span className={`absolute bottom-2 h-1.5 w-1.5 rounded-full ${styles.accent}`} />
-                        )}
+
                       </button>
                     )
                   })}

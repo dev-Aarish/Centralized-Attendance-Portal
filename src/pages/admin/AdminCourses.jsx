@@ -10,6 +10,8 @@ export default function AdminCourses() {
   const [showForm, setShowForm] = useState(false)
   const [formData, setFormData] = useState({ code: '', name: '', department: '', semester: '', type: 'Lecture' })
   const [submitting, setSubmitting] = useState(false)
+  const [filterDepartment, setFilterDepartment] = useState('All')
+  const [filterSemester, setFilterSemester] = useState('All')
 
   // Expandable teacher details
   const [expandedCourseId, setExpandedCourseId] = useState(null)
@@ -65,20 +67,27 @@ export default function AdminCourses() {
       return
     }
 
+    // Optimistic UI update: instantly remove it from view
+    setCourses((prev) => prev.filter((c) => c.id !== courseId))
+    if (expandedCourseId === courseId) setExpandedCourseId(null)
+
     try {
       await apiFetch(`/api/v1/admin/courses/${courseId}`, {
         method: 'DELETE',
       })
       setError(null)
-      // Clean up expanded state if this course was expanded
-      if (expandedCourseId === courseId) setExpandedCourseId(null)
+      
       const newTeacherData = { ...teacherData }
       delete newTeacherData[courseId]
       setTeacherData(newTeacherData)
-      await fetchCourses()
+      
+      // Sync in background without blocking
+      fetchCourses()
     } catch (err) {
-      setError(err.message)
+      setError(err.message || 'Failed to delete course. It may be in use.')
       console.error('Error removing course:', err)
+      // Revert state if deletion fails
+      await fetchCourses()
     }
   }
 
@@ -115,6 +124,16 @@ export default function AdminCourses() {
     )
   }
 
+  const filteredCourses = courses.filter(c => {
+    if (filterDepartment !== 'All' && c.department !== filterDepartment) return false;
+    if (filterSemester !== 'All' && c.semester !== parseInt(filterSemester)) return false;
+    return true;
+  }).sort((a, b) => {
+    if (a.department !== b.department) return (a.department || '').localeCompare(b.department || '');
+    if (a.semester !== b.semester) return (a.semester || 0) - (b.semester || 0);
+    return (a.name || '').localeCompare(b.name || '');
+  });
+
   return (
     <AppLayout title="Course Management">
       <div style={{ width: '100%' }} className="flex flex-col gap-6">
@@ -129,12 +148,38 @@ export default function AdminCourses() {
           </div>
         )}
 
-        <button
-          onClick={() => setShowForm(!showForm)}
-          className="w-fit px-4 py-2.5 rounded-xl bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium transition-colors"
-        >
-          {showForm ? 'Cancel' : '+ Create Course'}
-        </button>
+        <div className="flex flex-col sm:flex-row items-start sm:items-center justify-between gap-4">
+          <button
+            onClick={() => setShowForm(!showForm)}
+            className="w-fit px-4 py-2.5 rounded-xl bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium transition-colors"
+          >
+            {showForm ? 'Cancel' : '+ Create Course'}
+          </button>
+          
+          <div className="flex items-center gap-3">
+            <select
+              value={filterDepartment}
+              onChange={(e) => setFilterDepartment(e.target.value)}
+              className="px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="All">All Departments</option>
+              {Array.from(new Set(courses.map(c => c.department))).filter(Boolean).sort().map(dept => (
+                <option key={dept} value={dept}>{dept}</option>
+              ))}
+            </select>
+            
+            <select
+              value={filterSemester}
+              onChange={(e) => setFilterSemester(e.target.value)}
+              className="px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="All">All Semesters</option>
+              {Array.from(new Set(courses.map(c => c.semester))).filter(Boolean).sort((a,b)=>a-b).map(sem => (
+                <option key={sem} value={sem}>Semester {sem}</option>
+              ))}
+            </select>
+          </div>
+        </div>
 
         {showForm && (
           <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl px-5 py-4 space-y-4">
@@ -226,7 +271,7 @@ export default function AdminCourses() {
                   </tr>
                 </thead>
                 <tbody>
-                  {courses.map((course) => {
+                  {filteredCourses.map((course) => {
                     const isExpanded = expandedCourseId === course.id
                     const sections = teacherData[course.id] || []
                     const isLoadingThis = loadingTeachers === course.id

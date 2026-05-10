@@ -14,7 +14,12 @@ export async function getMyStudentProfile() {
 
 export async function getMyProfile() {
   try {
-    const result = await apiFetch('/api/v1/profiles/me', { cache: false })
+    const result = await apiFetch('/api/v1/profiles/me', { 
+      cache: true,
+      cacheTtlMs: CACHE_TTL_MS,
+      staleWindowMs: STALE_WINDOW_MS,
+      staleWhileRevalidate: true
+    })
     return { data: result.data, error: null }
   } catch (err) {
     return { data: null, error: err }

@@ -238,17 +238,22 @@ export default function LeaveApplicationsPanel({ open, onClose }) {
   if (!open) return null
 
   return (
-    <div className="absolute top-12 right-0 z-40 w-[min(32rem,92vw)] max-h-[75vh] overflow-y-auto rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-2xl p-4 flex flex-col gap-4">
-      <div className="flex items-center justify-between">
-        <p className="text-sm font-semibold text-gray-800 dark:text-white">Leave Applications</p>
-        <button
-          type="button"
-          onClick={onClose}
-          className="text-xs px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400"
-        >
-          Close
-        </button>
-      </div>
+    <>
+      <div className="fixed inset-0 z-30" onClick={onClose} />
+      <div className="absolute top-12 right-0 z-40 w-[min(32rem,92vw)] max-h-[75vh] overflow-y-auto rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-2xl p-4 flex flex-col gap-4">
+        <div className="flex items-center justify-between">
+          <p className="text-sm font-semibold text-gray-800 dark:text-white">Leave Applications</p>
+          <button
+            type="button"
+            onClick={onClose}
+            className="h-7 w-7 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 flex items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            title="Close"
+          >
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
+              <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+            </svg>
+          </button>
+        </div>
 
       {isStudent && (
         <form onSubmit={handleSubmit} className="rounded-xl border border-gray-200 dark:border-gray-700 p-3 bg-gray-50 dark:bg-gray-800/50 flex flex-col gap-3">
@@ -361,5 +366,6 @@ export default function LeaveApplicationsPanel({ open, onClose }) {
         </div>
       )}
     </div>
+    </>
   )
 }

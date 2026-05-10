@@ -64,8 +64,14 @@ export default function TopHeader({ title }) {
   const [posting, setPosting] = useState(false)
   const [studentLastSeenAt, setStudentLastSeenAt] = useState(null)
   const [profileFullName, setProfileFullName] = useState(null)
-  const [profileData, setProfileData] = useState(null)
-  const [roleProfile, setRoleProfile] = useState(null)
+  const [profileData, setProfileData] = useState(() => {
+    if (!user?.id) return null
+    try { return JSON.parse(localStorage.getItem(`cachedProfileData:${user.id}`)) || null } catch { return null }
+  })
+  const [roleProfile, setRoleProfile] = useState(() => {
+    if (!user?.id) return null
+    try { return JSON.parse(localStorage.getItem(`cachedRoleProfile:${user.id}`)) || null } catch { return null }
+  })
   const [profileLoading, setProfileLoading] = useState(false)
   const [profileError, setProfileError] = useState(null)
   const [avatarUploading, setAvatarUploading] = useState(false)
@@ -144,20 +150,24 @@ export default function TopHeader({ title }) {
 
         const baseProfile = profileRes.data || null
         setProfileData(baseProfile)
+        if (baseProfile) localStorage.setItem(`cachedProfileData:${user.id}`, JSON.stringify(baseProfile))
         if (baseProfile?.full_name) setProfileFullName(baseProfile.full_name)
 
         if (role === 'student') {
           const studentRes = await getMyStudentProfile()
-          if (!studentRes.error) {
+          if (!studentRes.error && studentRes.data) {
             setRoleProfile(studentRes.data)
+            localStorage.setItem(`cachedRoleProfile:${user.id}`, JSON.stringify(studentRes.data))
           }
         } else if (role === 'teacher') {
           const teacherRes = await getMyTeacherProfile()
-          if (!teacherRes.error) {
+          if (!teacherRes.error && teacherRes.data) {
             setRoleProfile(teacherRes.data)
+            localStorage.setItem(`cachedRoleProfile:${user.id}`, JSON.stringify(teacherRes.data))
           }
         } else {
           setRoleProfile(null)
+          localStorage.removeItem(`cachedRoleProfile:${user.id}`)
         }
       } catch (err) {
         setProfileError(err?.message || 'Failed to load profile.')
@@ -207,17 +217,23 @@ export default function TopHeader({ title }) {
       return
     }
 
-    setProfileData((current) => ({
-      ...(current || {}),
-      avatar_url: data.avatarUrl,
-    }))
-    setRoleProfile((current) => current ? {
-      ...current,
-      profiles: {
-        ...(current.profiles || {}),
-        avatar_url: data.avatarUrl,
-      },
-    } : current)
+    setProfileData((current) => {
+      const updated = { ...(current || {}), avatar_url: data.avatarUrl }
+      localStorage.setItem(`cachedProfileData:${user.id}`, JSON.stringify(updated))
+      return updated
+    })
+    setRoleProfile((current) => {
+      if (!current) return current
+      const updated = {
+        ...current,
+        profiles: {
+          ...(current.profiles || {}),
+          avatar_url: data.avatarUrl,
+        },
+      }
+      localStorage.setItem(`cachedRoleProfile:${user.id}`, JSON.stringify(updated))
+      return updated
+    })
     setAvatarUploading(false)
   }
 
@@ -331,12 +347,6 @@ export default function TopHeader({ title }) {
         
         <div className="flex items-center gap-2">
           <button
-            onClick={handleSignOut}
-            className="text-xs text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 px-3 py-1.5 rounded-lg font-medium transition-colors border border-red-100 dark:border-red-900/30"
-          >
-            Sign out
-          </button>
-          <button
             type="button"
             onClick={() => {
               setIsProfileOpen((current) => !current)
@@ -355,17 +365,22 @@ export default function TopHeader({ title }) {
         </div>
 
         {isOpen && (
-          <div className="absolute top-12 right-0 z-40 w-[min(28rem,88vw)] max-h-[70vh] overflow-y-auto rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-2xl p-4 flex flex-col gap-4">
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-semibold text-gray-800 dark:text-white">Announcements</p>
-              <button
-                type="button"
-                onClick={() => setIsOpen(false)}
-                className="text-xs px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400"
-              >
-                Close
-              </button>
-            </div>
+          <>
+            <div className="fixed inset-0 z-30" onClick={() => setIsOpen(false)} />
+            <div className="absolute top-12 right-0 z-40 w-[min(28rem,88vw)] max-h-[70vh] overflow-y-auto rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-2xl p-4 flex flex-col gap-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-gray-800 dark:text-white">Announcements</p>
+                <button
+                  type="button"
+                  onClick={() => setIsOpen(false)}
+                  className="h-7 w-7 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 flex items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                  title="Close"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
+                    <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+              </div>
 
             {(role === 'teacher' || role === 'admin') && (
               <div className="rounded-xl border border-gray-200 dark:border-gray-700 p-3 bg-gray-50 dark:bg-gray-800/50 flex flex-col gap-2">
@@ -460,20 +475,26 @@ export default function TopHeader({ title }) {
               </div>
             )}
           </div>
+          </>
         )}
 
         {isProfileOpen && (
-          <div className="absolute top-12 right-0 z-40 w-[min(26rem,88vw)] max-h-[70vh] overflow-y-auto rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-2xl p-4 flex flex-col gap-4">
-            <div className="flex items-center justify-between">
-              <p className="text-sm font-semibold text-gray-800 dark:text-white">Profile</p>
-              <button
-                type="button"
-                onClick={() => setIsProfileOpen(false)}
-                className="text-xs px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400"
-              >
-                Close
-              </button>
-            </div>
+          <>
+            <div className="fixed inset-0 z-30" onClick={() => setIsProfileOpen(false)} />
+            <div className="absolute top-12 right-0 z-40 w-[min(26rem,88vw)] max-h-[70vh] overflow-y-auto rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-2xl p-4 flex flex-col gap-4">
+              <div className="flex items-center justify-between">
+                <p className="text-sm font-semibold text-gray-800 dark:text-white">Profile</p>
+                <button
+                  type="button"
+                  onClick={() => setIsProfileOpen(false)}
+                  className="h-7 w-7 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-500 dark:text-gray-400 flex items-center justify-center hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+                  title="Close"
+                >
+                  <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
+                    <path d="M18 6L6 18M6 6l12 12" strokeLinecap="round" strokeLinejoin="round" />
+                  </svg>
+                </button>
+              </div>
 
             <div className="flex items-center gap-3">
               <div className="h-14 w-14 rounded-full border border-blue-100 dark:border-blue-900 bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 flex items-center justify-center overflow-hidden">
@@ -520,7 +541,18 @@ export default function TopHeader({ title }) {
                 <p className="text-[11px] text-red-500">{profileError}</p>
               )}
             </div>
+
+            <button
+              onClick={handleSignOut}
+              className="w-full mt-2 text-sm text-red-500 hover:bg-red-50 dark:hover:bg-red-950/30 py-2 rounded-lg font-semibold transition-colors border border-red-100 dark:border-red-900/30 flex items-center justify-center gap-2"
+            >
+              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-4 w-4">
+                <path d="M9 21H5a2 2 0 0 1-2-2V5a2 2 0 0 1 2-2h4M16 17l5-5-5-5M21 12H9" strokeLinecap="round" strokeLinejoin="round" />
+              </svg>
+              Sign out
+            </button>
           </div>
+          </>
         )}
 
         <LeaveApplicationsPanel

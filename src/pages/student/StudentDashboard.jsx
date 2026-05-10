@@ -90,7 +90,12 @@ const TripleActivityRings = ({ overall = 0, lecture = 0, lab = 0, size = 280 }) 
         </defs>
       </svg>
       
-      {/* Center Text Removed */}
+      <div className="absolute inset-0 flex flex-col items-center justify-center pointer-events-none z-20">
+        <div className="text-4xl font-black text-white flex items-baseline drop-shadow-lg">
+          <NumberCounter value={overall} duration={1.5} />
+          <span className="text-xl ml-1 text-white/50"></span>
+        </div>
+      </div>
     </div>
   );
 };
@@ -193,8 +198,9 @@ const HolographicTrendChart = ({ dailyData }) => {
               <div className="w-full relative rounded-full bg-white/5 backdrop-blur-md border border-white/10 h-full overflow-hidden flex flex-col justify-end">
                 <motion.div 
                   initial={{ height: 0, opacity: 0 }} 
-                  animate={{ height: `${pct}%`, opacity: 1 }} 
-                  transition={{ type: "spring", stiffness: 60, damping: 12, delay: i * 0.05 }}
+                  whileInView={{ height: `${pct}%`, opacity: 1 }} 
+                  viewport={{ once: true, margin: "0px 0px -50px 0px" }}
+                  transition={{ duration: 1.8, ease: [0.16, 1, 0.3, 1], delay: 0.1 + (i * 0.08) }}
                   className={`w-full rounded-full bg-gradient-to-t ${gradient} relative`}
                 >
                   {/* Inner reflections to make it look 3D / glass */}
@@ -448,7 +454,7 @@ export default function StudentDashboard() {
   if (loading) {
     return (
       <AppLayout title="Dashboard">
-        <div className="h-[80vh] flex flex-col items-center justify-center bg-[#0a0a0f]">
+        <div className="min-h-full flex flex-col items-center justify-center pb-20">
           <SpiralLoader />
           <p className="mt-4 text-white/50 text-sm animate-pulse">Analyzing attendance patterns...</p>
         </div>
@@ -474,7 +480,7 @@ export default function StudentDashboard() {
 
   return (
     <AppLayout title="Dashboard">
-      <div className="min-h-full bg-[#0a0a0f] p-4 md:p-6 pb-24 text-white overflow-hidden">
+      <div className="min-h-full p-4 md:p-6 pb-24 text-white overflow-hidden">
         <div className="max-w-7xl mx-auto space-y-6">
           
           {/* 1. Hero Header */}
@@ -483,8 +489,6 @@ export default function StudentDashboard() {
             animate={{ opacity: 1, y: 0 }}
             className="relative overflow-hidden rounded-[2rem] bg-[#12121a]/80 backdrop-blur-xl border border-white/5 p-6 md:p-8"
           >
-            {/* Animated Gradient border effect using ::before in standard CSS, but we'll use a div here */}
-            <div className="absolute inset-x-0 top-0 h-[2px] bg-gradient-to-r from-emerald-500 via-cyan-500 to-blue-500 opacity-50" />
             
             <h1 className="text-3xl md:text-4xl font-black tracking-tight mb-2">
               Welcome back, <span className="text-transparent bg-clip-text bg-gradient-to-r from-cyan-400 to-blue-500">{firstName}</span>!
@@ -513,9 +517,8 @@ export default function StudentDashboard() {
                   initial={{ opacity: 0, x: -20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.1 }}
                   className="rounded-[2rem] bg-[#12121a] border border-white/5 p-6 md:p-8 flex flex-col items-center shadow-2xl relative overflow-hidden"
                 >
-                  <h2 className="text-lg font-bold self-start mb-6 w-full flex justify-between items-center">
+                  <h2 className="text-lg font-bold self-start mb-6">
                     Performance
-                    <span className="text-[10px] font-black uppercase tracking-widest text-emerald-400 bg-emerald-400/10 px-2 py-1 rounded-full">Live</span>
                   </h2>
                   <TripleActivityRings overall={overall} lecture={lecture} lab={lab} size={260} />
                   
@@ -645,14 +648,42 @@ const StatCard = ({ title, value, subtext, suffix = "", delay, color, icon }) =>
 const SubjectRow = ({ subject, index, onClick }) => {
   const { name, code, percentage, attended, total, isLab } = subject;
   const isSafe = percentage >= 75;
+  const isExcellent = percentage >= 90;
   
   return (
     <motion.div 
-      initial={{ opacity: 0, x: 20 }} animate={{ opacity: 1, x: 0 }} transition={{ delay: 0.3 + index * 0.05 }}
+      initial={{ opacity: 0, x: 20, scale: 0.95 }} 
+      animate={{ 
+        opacity: 1, 
+        x: 0,
+        scale: isExcellent ? [1, 1.03, 1] : 1,
+        ...(isExcellent ? {
+          boxShadow: [
+            "0px 0px 0px 0px rgba(52,211,153,0)", 
+            "0px 4px 30px 5px rgba(52,211,153,0.6)", 
+            "0px 0px 0px 0px rgba(52,211,153,0)"
+          ]
+        } : {})
+      }} 
+      transition={{ 
+        delay: 0.3 + index * 0.05,
+        opacity: { duration: 0.4 },
+        x: { duration: 0.4 },
+        scale: { delay: 0.6 + index * 0.05, duration: 0.8, ease: "backOut" },
+        boxShadow: { delay: 0.6 + index * 0.05, duration: 1.5, ease: "easeInOut" }
+      }}
       onClick={onClick}
-      className="group cursor-pointer rounded-xl bg-white/[0.02] border border-white/5 p-4 hover:bg-white/[0.04] transition-all"
+      className={`group cursor-pointer rounded-xl bg-white/[0.02] border ${isExcellent ? 'border-emerald-500/50' : 'border-white/5'} p-4 hover:bg-white/[0.04] transition-all relative overflow-hidden`}
     >
-      <div className="flex justify-between items-start mb-2">
+      {isExcellent && (
+        <motion.div 
+          initial={{ x: '-100%' }}
+          animate={{ x: '200%' }}
+          transition={{ delay: 0.8 + index * 0.05, duration: 1.2, ease: 'easeInOut' }}
+          className="absolute inset-0 w-1/2 bg-gradient-to-r from-transparent via-emerald-400/30 to-transparent skew-x-12 pointer-events-none"
+        />
+      )}
+      <div className="flex justify-between items-start mb-2 relative z-10">
         <div className="flex items-center gap-2">
           <span className="text-[10px] font-black uppercase tracking-widest bg-white/10 px-2 py-0.5 rounded text-white/60">
             {code}

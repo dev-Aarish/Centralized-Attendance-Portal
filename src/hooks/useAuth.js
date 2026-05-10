@@ -1,7 +1,15 @@
-import { useState, useEffect } from 'react'
+import React, { useState, useEffect, createContext, useContext } from 'react'
 import { getRole, getUser, onAuthStateChange } from '../lib/auth'
 
-export function useAuth() {
+const AuthContext = createContext({
+  user: null,
+  role: null,
+  adminDepartment: null,
+  requiresOnboarding: false,
+  loading: true
+})
+
+export function AuthProvider({ children }) {
   const [user, setUser] = useState(null)
   const [role, setRole] = useState(() => localStorage.getItem('role'))
   const [adminDepartment, setAdminDepartment] = useState(() => localStorage.getItem('adminDepartment'))
@@ -103,5 +111,13 @@ export function useAuth() {
     }
   }, [])
 
-  return { user, role, adminDepartment, requiresOnboarding, loading }
+  return React.createElement(
+    AuthContext.Provider,
+    { value: { user, role, adminDepartment, requiresOnboarding, loading } },
+    children
+  )
+}
+
+export function useAuth() {
+  return useContext(AuthContext)
 }
