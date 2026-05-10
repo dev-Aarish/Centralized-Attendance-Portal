@@ -156,7 +156,9 @@ export default function StudentAttendanceHeatmap() {
       setError(null)
 
       try {
-        const { data, error: fetchError } = await getMyAttendanceDetails(type)
+        // Fetch 'all' instead of 'type' to ensure we include 'regular', 'randomized', etc.
+        // This guarantees the heatmap data perfectly matches the overall dashboard data.
+        const { data, error: fetchError } = await getMyAttendanceDetails('all')
 
         if (!active) return
 
