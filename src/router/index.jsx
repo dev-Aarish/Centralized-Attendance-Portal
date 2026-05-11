@@ -32,9 +32,7 @@ function RoleRouter() {
     if (role === 'student') {
       requests.push(
         apiFetch('/api/v1/profiles/student', cacheOptions),
-        apiFetch('/api/v1/attendance/summary/lecture', cacheOptions),
-        apiFetch('/api/v1/attendance/summary/lab', cacheOptions),
-        apiFetch('/api/v1/schedules/student', cacheOptions),
+        apiFetch('/api/v1/attendance/dashboard-summary', cacheOptions),
       )
     }
 

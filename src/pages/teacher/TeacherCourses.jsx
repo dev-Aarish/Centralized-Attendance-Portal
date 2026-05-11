@@ -3,9 +3,6 @@ import AppLayout from '../../components/shared/AppLayout'
 import { getMyAssignedSections, getStudentsInSection } from '../../lib/profile'
 import { getSessionsForSection, getRecordsForSession } from '../../lib/attendance'
 import SpiralLoader from '../../components/shared/Loader'
-import { jsPDF } from 'jspdf'
-import autoTable from 'jspdf-autotable'
-import * as XLSX from 'xlsx'
 
 export default function TeacherCourses() {
   const [sections, setSections] = useState([])
@@ -132,6 +129,9 @@ export default function TeacherCourses() {
 
     try {
       const { courseInfo, studentRows, sessionRows } = await buildAttendanceExportData()
+      const { jsPDF } = await import('jspdf')
+      const autoTableModule = await import('jspdf-autotable')
+      const autoTable = autoTableModule.default || autoTableModule
       const doc = new jsPDF({ orientation: 'portrait', unit: 'pt', format: 'a4' })
       const autoTableFn = typeof autoTable === 'function' ? autoTable : autoTable?.default
 
@@ -190,6 +190,7 @@ export default function TeacherCourses() {
 
     try {
       const { courseInfo, studentRows, sessionRows } = await buildAttendanceExportData()
+      const XLSX = await import('xlsx')
 
       const summarySheet = XLSX.utils.json_to_sheet([
         {

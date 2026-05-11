@@ -7,6 +7,21 @@ const MAX_CACHE_ENTRIES = 200
 const responseCache = new Map()
 const inFlightRequests = new Map()
 
+// ─── Session Cache ────────────────────────────────────────────────────────────
+// Avoid calling supabase.auth.getSession() on every apiFetch().
+let _cachedSession = null
+
+async function getSessionCached() {
+  if (_cachedSession) return _cachedSession
+  const { data: { session } } = await supabase.auth.getSession()
+  _cachedSession = session
+  return session
+}
+
+supabase.auth.onAuthStateChange((_event, session) => {
+  _cachedSession = session
+})
+
 function buildCacheKey(userId, method, url) {
   return `${userId || 'anonymous'}::${method}::${url}`
 }
@@ -75,7 +90,7 @@ async function parseResponseBody(response) {
  * All API calls to the Express backend go through this.
  */
 export async function apiFetch(path, options = {}) {
-  const { data: { session } } = await supabase.auth.getSession()
+  const session = await getSessionCached()
   const token = session?.access_token
   const userId = session?.user?.id
 

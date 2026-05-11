@@ -1,5 +1,6 @@
 import { Router } from 'express'
 import { supabaseAdmin } from '../lib/supabase.js'
+import { getCachedResponse, setCachedResponse, invalidateUserResponses, devLog } from '../lib/cache.js'
 
 const router = Router()
 
@@ -281,31 +282,34 @@ async function getEffectiveEnrollmentsForStudent(supabase, studentProfile) {
   const studentYear = normalizeYear(studentProfile.year_of_study) ?? toYearFromSemester(studentProfile.current_semester)
   const studentSemester = studentProfile.current_semester ? parseInt(studentProfile.current_semester, 10) : null
 
-  // NEW: Fetch sections from the active routine for this cohort to support cross-departmental courses
-  const { data: activeRoutine } = await supabase
-    .from('class_routines')
-    .select('id')
-    .eq('year_of_study', studentYear)
-    .eq('section', studentProfile.section)
-    .eq('is_active', true)
-    .single()
+  // Fetch active routine + filter candidates in parallel
+  const [routineResult, matchedSections] = await Promise.all([
+    supabase
+      .from('class_routines')
+      .select('id')
+      .eq('year_of_study', studentYear)
+      .eq('section', studentProfile.section)
+      .eq('is_active', true)
+      .maybeSingle(),
+    Promise.resolve(
+      (candidates || []).filter((c) => {
+        const sectionYear = normalizeYear(c.year_of_study)
+        const sectionSemester = c.courses?.semester ? parseInt(c.courses.semester, 10) : null
+        return matchesStudentCohort(studentYear, studentSemester, sectionYear, sectionSemester)
+      })
+    ),
+  ])
 
+  const activeRoutine = routineResult.data
   let routineSectionIds = []
   if (activeRoutine) {
     const { data: routineSchedules } = await supabase
       .from('class_schedules')
       .select('class_section_id')
       .eq('routine_id', activeRoutine.id)
-    
+
     routineSectionIds = (routineSchedules || []).map(s => s.class_section_id).filter(Boolean)
   }
-
-  const matchedSections = (candidates || []).filter((c) => {
-    const sectionYear = normalizeYear(c.year_of_study)
-    const sectionSemester = c.courses?.semester ? parseInt(c.courses.semester, 10) : null
-
-    return matchesStudentCohort(studentYear, studentSemester, sectionYear, sectionSemester)
-  })
 
   // Merge in sections from the active routine (cross-dept support)
   if (routineSectionIds.length > 0) {
@@ -418,32 +422,28 @@ async function buildAttendanceDetails(supabase, studentId, sessionType) {
       .sort((a, b) => a.subjectName.localeCompare(b.subjectName))
   }
 
-  const teacherNameMap = await resolveTeacherNameMap(
-    supabase,
-    sessions.map((s) => s.teacher_id)
-  )
+  // Fire teacher name resolution, student records, and schedule lookup in parallel
+  const [teacherNameMap, recordsResult, classSchedulesResult] = await Promise.all([
+    resolveTeacherNameMap(supabase, sessions.map((s) => s.teacher_id)),
+    supabase
+      .from('attendance_records')
+      .select('session_id, status')
+      .eq('student_id', studentId)
+      .in('session_id', sessions.map((s) => s.id)),
+    supabase
+      .from('class_schedules')
+      .select('class_section_id, day, start_time, end_time')
+      .in('class_section_id', classSectionIds),
+  ])
 
-  const sessionIds = sessions.map((s) => s.id)
-
-  // Single query: student's attendance records for the fetched sessions.
-  const { data: records } = await supabase
-    .from('attendance_records')
-    .select('session_id, status')
-    .eq('student_id', studentId)
-    .in('session_id', sessionIds)
+  const records = recordsResult.data
 
   // Build O(1) lookup: session_id → status
   const recordMap = {}
   records?.forEach(r => { recordMap[r.session_id] = r.status })
 
   // Primary schedule source: class_schedules (new schema).
-  const { data: classSchedules } = await supabase
-    .from('class_schedules')
-    .select('class_section_id, day, start_time, end_time')
-    .in('class_section_id', classSectionIds)
-
-  // Legacy fallback for older deployments still using schedules.
-  let schedules = classSchedules || []
+  let schedules = classSchedulesResult.data || []
   if (!schedules.length) {
     const { data: legacySchedules } = await supabase
       .from('schedules')
@@ -609,7 +609,7 @@ async function getUsedSessionsForDay(supabase, classSectionId, today) {
 router.get('/sessions/slots', async (req, res) => {
   try {
     const { classSectionId } = req.query
-    console.log('[slots] Request received, classSectionId:', classSectionId)
+    devLog('[slots] Request received, classSectionId:', classSectionId)
 
     // Get teacher profile
     const { data: teacherProfile, error: tpError } = await req.supabase
@@ -623,7 +623,7 @@ router.get('/sessions/slots', async (req, res) => {
 
     const today = new Date().toISOString().split('T')[0]
     const todayDay = DAY_NAMES_FULL[new Date().getDay()]
-    console.log('[slots] today:', today, 'dayName:', todayDay)
+    devLog('[slots] today:', today, 'dayName:', todayDay)
 
     // Resolve which sections to report on
     let sectionIds = []
@@ -648,7 +648,7 @@ router.get('/sessions/slots', async (req, res) => {
       sectionIds = Array.from(new Set([...sectionIds, ...scheduleIds]))
     }
 
-    console.log('[slots] sectionIds:', sectionIds)
+    devLog('[slots] sectionIds:', sectionIds)
 
     if (sectionIds.length === 0) {
       return res.json({ data: [] })
@@ -661,7 +661,7 @@ router.get('/sessions/slots', async (req, res) => {
     for (const secId of sectionIds) {
       const max = await getMaxSessionsForDay(db, secId, todayDay)
       const used = await getUsedSessionsForDay(db, secId, today)
-      console.log('[slots] section:', secId, 'max:', max, 'used:', used)
+      devLog('[slots] section:', secId, 'max:', max, 'used:', used)
 
       results.push({
         classSectionId: secId,
@@ -675,7 +675,7 @@ router.get('/sessions/slots', async (req, res) => {
       })
     }
 
-    console.log('[slots] returning', results.length, 'results')
+    devLog('[slots] returning', results.length, 'results')
     return res.json({ data: results })
   } catch (err) {
     console.error('GET /attendance/sessions/slots error:', err)
@@ -987,10 +987,16 @@ router.get('/details/:type', async (req, res) => {
       return res.status(400).json({ error: `Invalid type. Must be one of: ${VALID_SESSION_TYPES.join(', ')}` })
     }
 
+    // Server-side response cache
+    const cachePath = `/details/${sessionType}`
+    const cached = getCachedResponse(req.user.id, cachePath)
+    if (cached) return res.json({ data: cached })
+
     const studentProfile = await getStudentProfile(req.supabase, req.user.id)
     if (!studentProfile) return res.json({ data: [] })
 
     const data = await buildAttendanceDetails(req.supabase, studentProfile.id, sessionType)
+    setCachedResponse(req.user.id, cachePath, data)
     return res.json({ data })
   } catch (err) {
     console.error('GET /attendance/details/:type error:', err)
@@ -1009,6 +1015,11 @@ router.get('/summary/:type', async (req, res) => {
       return res.status(400).json({ error: `Invalid type. Must be one of: ${VALID_SESSION_TYPES.join(', ')}` })
     }
 
+    // Server-side response cache
+    const cachePath = `/summary/${sessionType}`
+    const cached = getCachedResponse(req.user.id, cachePath)
+    if (cached) return res.json({ data: cached })
+
     const studentProfile = await getStudentProfile(req.supabase, req.user.id)
     if (!studentProfile) return res.json({ data: [] })
 
@@ -1021,9 +1032,93 @@ router.get('/summary/:type', async (req, res) => {
       percentage: s.overallPercentage,
     }))
 
+    setCachedResponse(req.user.id, cachePath, data)
     return res.json({ data })
   } catch (err) {
     console.error('GET /attendance/summary/:type error:', err)
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// ─── STUDENT: DASHBOARD SUMMARY (Pre-aggregated) ─────────────────────────────
+router.get('/dashboard-summary', async (req, res) => {
+  try {
+    const cachePath = '/dashboard-summary'
+    const cached = getCachedResponse(req.user.id, cachePath)
+    if (cached) return res.json({ data: cached })
+
+    const studentProfile = await getStudentProfile(req.supabase, req.user.id)
+    if (!studentProfile) return res.json({ data: null })
+
+    const allDetails = await buildAttendanceDetails(req.supabase, studentProfile.id, 'all')
+
+    let lecTotal = 0, lecAttended = 0
+    let labTotal = 0, labAttended = 0
+    let totalSessions = 0, totalAttended = 0
+    let bestSubject = null
+
+    const subjects = allDetails.map(sub => {
+      const t = sub.totalClasses || 0
+      const a = sub.attendedClasses || 0
+      const pct = sub.overallPercentage || 0
+      const code = sub.subjectCode || ''
+      const name = sub.subjectName || ''
+      totalSessions += t
+      totalAttended += a
+
+      const nameStr = String(name).toUpperCase()
+      const codeStr = String(code).toUpperCase()
+      const isLab = codeStr.endsWith('L') || codeStr.includes('LAB') ||
+        /\bLAB\b/.test(nameStr)
+
+      if (isLab) { labTotal += t; labAttended += a }
+      else { lecTotal += t; lecAttended += a }
+
+      if (t > 0 && (!bestSubject || pct > bestSubject.pct)) {
+        bestSubject = { name, pct, code }
+      }
+
+      return { id: sub.classSectionId || code, name, code, total: t, attended: a, percentage: pct, isLab }
+    }).sort((a, b) => b.percentage - a.percentage)
+
+    const overall = totalSessions > 0 ? Math.round((totalAttended / totalSessions) * 100) : 0
+    const lecture = lecTotal > 0 ? Math.round((lecAttended / lecTotal) * 100) : 0
+    const lab = labTotal > 0 ? Math.round((labAttended / labTotal) * 100) : 0
+
+    const byDate = {}
+    allDetails.forEach(sub => {
+      (sub.teachers || []).forEach(t => {
+        (t.records || []).forEach(r => {
+          if (r.sessionDate) {
+            if (!byDate[r.sessionDate]) byDate[r.sessionDate] = { date: r.sessionDate, present: 0, absent: 0, late: 0, total: 0 }
+            byDate[r.sessionDate].total++
+            if (r.status === 'present') byDate[r.sessionDate].present++
+            if (r.status === 'late') byDate[r.sessionDate].late++
+            if (r.status === 'absent') byDate[r.sessionDate].absent++
+          }
+        })
+      })
+    })
+    const dailyData = Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date))
+
+    let streak = 0
+    const DAY_MS = 24 * 60 * 60 * 1000
+    const today = new Date()
+    for (let i = 0; i < 60; i++) {
+      const d = new Date(today.getTime() - i * DAY_MS)
+      const key = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      const day = byDate[key]
+      if (day) {
+        if (day.absent > 0) break
+        if (day.present > 0 || day.late > 0) streak++
+      }
+    }
+
+    const result = { overall, lecture, lab, subjects, dailyData, stats: { totalClasses: totalSessions, attendedClasses: totalAttended, streak, bestSubject } }
+    setCachedResponse(req.user.id, cachePath, result)
+    return res.json({ data: result })
+  } catch (err) {
+    console.error('GET /attendance/dashboard-summary error:', err)
     return res.status(500).json({ error: 'Internal server error' })
   }
 })

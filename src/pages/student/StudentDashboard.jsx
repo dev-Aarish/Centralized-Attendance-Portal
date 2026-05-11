@@ -3,8 +3,7 @@ import { useNavigate } from 'react-router-dom'
 import { motion } from 'framer-motion'
 import AppLayout from '../../components/shared/AppLayout'
 import SpiralLoader from '../../components/shared/Loader'
-import { getMyAttendanceDetails, getMyAttendanceSummaryByType } from '../../lib/attendance'
-import { getMyStudentSchedule } from '../../lib/schedule'
+import { getMyDashboardSummary } from '../../lib/attendance'
 import { getMyStudentProfile } from '../../lib/profile'
 
 // --- Helpers ---
@@ -299,146 +298,34 @@ export default function StudentDashboard() {
     async function fetchDashboardData() {
       try {
         setLoading(true);
-        const [profileRes, detailsRes, scheduleRes] = await Promise.all([
+        const [profileRes, summaryRes] = await Promise.all([
           getMyStudentProfile(),
-          getMyAttendanceDetails('all'), // gives subject breakdown + records
-          getMyStudentSchedule() // good for baseline
+          getMyDashboardSummary(),
         ]);
 
         if (!active) return;
-        
+
         const profile = profileRes.data;
-        const allDetails = detailsRes.data || [];
-        
-        const scheduleItems = scheduleRes.data || [];
-        
-        // 1. Process Subjects
-        let lecTotal = 0, lecAttended = 0;
-        let labTotal = 0, labAttended = 0;
-        let totalSessions = 0, totalAttended = 0;
-        let bestSubj = null;
+        const summary = summaryRes.data;
 
-        const processedSubjects = allDetails.map(sub => {
-          const t = sub.totalClasses || 0;
-          const a = sub.attendedClasses || 0;
-          const pct = sub.overallPercentage || 0;
-          const code = sub.subjectCode || '';
-          const name = sub.subjectName || '';
-          
-          totalSessions += t;
-          totalAttended += a;
-          
-          // Precise Lab Detection via Schedule Cross-referencing
-          const schedItem = scheduleItems.find(s => {
-             const c = s.class_sections?.courses?.[0] || s.class_sections?.courses || s.courses?.[0] || s.courses;
-             return c?.code === code;
-          });
-          const cObj = schedItem?.class_sections?.courses?.[0] || schedItem?.class_sections?.courses || schedItem?.courses?.[0] || schedItem?.courses || {};
-          const courseType = (cObj.type || '').toLowerCase();
-          const classType = (schedItem?.class_type || schedItem?.classType || '').toLowerCase();
-          
-          const nameStr = String(name || '').toUpperCase();
-          const codeStr = String(code || '').toUpperCase();
-          
-          const isLab = 
-            courseType === 'lab' || 
-            classType === 'lab' || 
-            codeStr.endsWith('L') ||
-            codeStr.includes('LAB') ||
-            nameStr.includes(' LAB') ||
-            nameStr.includes('LAB ') ||
-            nameStr.includes('(LAB)') ||
-            nameStr.endsWith('LAB') ||
-            /\bLAB\b/.test(nameStr);
-
-          if (isLab) {
-            labTotal += t;
-            labAttended += a;
-          } else {
-            lecTotal += t;
-            lecAttended += a;
-          }
-
-          if (t > 0 && (!bestSubj || pct > bestSubj.pct)) {
-            bestSubj = { name: sub.subjectName, pct, code: sub.subjectCode };
-          }
-          
-          return {
-            id: sub.classSectionId || sub.subjectCode,
-            name: sub.subjectName,
-            code: sub.subjectCode,
-            total: t,
-            attended: a,
-            percentage: pct,
-            isLab
-          };
-        }).sort((a,b) => b.percentage - a.percentage);
-
-        // Calculate Overall %
-        const overall = totalSessions > 0 ? Math.round((totalAttended / totalSessions) * 100) : 0;
-        const lecture = lecTotal > 0 ? Math.round((lecAttended / lecTotal) * 100) : 0;
-        const lab = labTotal > 0 ? Math.round((labAttended / labTotal) * 100) : 0;
-
-        // 2. Process Daily Data (for charts and streak)
-        // Flatten all records from all teachers from all subjects
-        const flatRecords = [];
-        allDetails.forEach(sub => {
-          (sub.teachers || []).forEach(t => {
-            (t.records || []).forEach(r => {
-              if (r.sessionDate) {
-                flatRecords.push(r);
-              }
-            });
-          });
-        });
-
-        // Group by date
-        const byDate = {};
-        flatRecords.forEach(r => {
-          if (!byDate[r.sessionDate]) {
-            byDate[r.sessionDate] = { date: r.sessionDate, present: 0, absent: 0, late: 0, total: 0 };
-          }
-          byDate[r.sessionDate].total++;
-          if (r.status === 'present') byDate[r.sessionDate].present++;
-          if (r.status === 'late') byDate[r.sessionDate].late++;
-          if (r.status === 'absent') byDate[r.sessionDate].absent++;
-        });
-
-        const dailyData = Object.values(byDate).sort((a,b) => a.date.localeCompare(b.date));
-
-        // 3. Calculate Current Streak
-        let streak = 0;
-        // Go backwards from today
-        const today = new Date();
-        for (let i = 0; i < 60; i++) { // check up to 60 days back
-          const d = new Date(today.getTime() - i * DAY_MS);
-          const key = getLocalDateKey(d);
-          const day = byDate[key];
-          
-          if (day) {
-            // Day had classes
-            if (day.absent > 0) {
-              break; // Streak broken!
-            } else if (day.present > 0 || day.late > 0) {
-              streak++; // Good day
+        if (summary) {
+          setData({
+            profile,
+            overall: summary.overall || 0,
+            lecture: summary.lecture || 0,
+            lab: summary.lab || 0,
+            subjects: summary.subjects || [],
+            dailyData: summary.dailyData || [],
+            stats: summary.stats || {
+              totalClasses: 0,
+              attendedClasses: 0,
+              streak: 0,
+              bestSubject: null
             }
-          }
+          });
+        } else {
+          setData(prev => ({ ...prev, profile }));
         }
-
-        setData({
-          profile,
-          overall,
-          lecture,
-          lab,
-          subjects: processedSubjects,
-          dailyData,
-          stats: {
-            totalClasses: totalSessions,
-            attendedClasses: totalAttended,
-            streak,
-            bestSubject: bestSubj
-          }
-        });
 
       } catch (err) {
         if (active) setError(err.message || 'Failed to load dashboard.');

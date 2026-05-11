@@ -9,6 +9,14 @@ import { apiFetch } from './api'
 export const SESSION_TYPES = ['all', 'regular', 'randomized', 'lecture', 'lab', 'tutorial']
 export const ATTENDANCE_THRESHOLD = 75  // default % required
 
+// ─── STUDENT: DASHBOARD (Pre-aggregated) ──────────────────────────────────────
+
+export async function getMyDashboardSummary() {
+  return apiFetch('/api/v1/attendance/dashboard-summary')
+    .then(r => ({ data: r.data, error: null }))
+    .catch(err => ({ data: null, error: err }))
+}
+
 // ─── TEACHER: SESSION MANAGEMENT ─────────────────────────────────────────────
 
 /**
