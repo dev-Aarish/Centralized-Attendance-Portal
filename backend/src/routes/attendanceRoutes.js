@@ -1,6 +1,7 @@
 import { Router } from 'express'
 import { supabaseAdmin } from '../lib/supabase.js'
 import { getCachedResponse, setCachedResponse, invalidateUserResponses, devLog } from '../lib/cache.js'
+import { sendEmail } from '../lib/email.js'
 
 const router = Router()
 
@@ -846,6 +847,134 @@ router.post('/sessions/:id/records', async (req, res) => {
       .select()
 
     if (error) return res.status(400).json({ error: error.message })
+
+    // ─── LOW ATTENDANCE NOTIFICATION LOGIC ──────────────────────────────────────
+    // After successfully saving records, check if any student's attendance
+    // just crossed the 60% threshold downwards.
+    try {
+      const studentIds = records.map(r => r.student_id)
+      const { data: sessionData } = await req.supabase
+        .from('attendance_sessions')
+        .select(`
+          class_section_id,
+          teacher_id,
+          teacher_profiles ( profiles ( full_name ) ),
+          class_sections (
+            courses ( id, name, code )
+          )
+        `)
+        .eq('id', sessionId)
+        .single()
+
+      if (sessionData) {
+        const sectionId = sessionData.class_section_id
+        const course = sessionData.class_sections?.courses
+        const teacherName = sessionData.teacher_profiles?.profiles?.full_name || 'Your Teacher'
+
+        for (const studentId of studentIds) {
+          // 1. Get ALL sessions for this section
+          const { data: allSessions } = await req.supabase
+            .from('attendance_sessions')
+            .select('id')
+            .eq('class_section_id', sectionId)
+
+          if (!allSessions?.length) continue
+          const allSessionIds = allSessions.map(s => s.id)
+
+          // 2. Get student's records for all these sessions
+          const { data: studentRecords } = await req.supabase
+            .from('attendance_records')
+            .select('session_id, status')
+            .eq('student_id', studentId)
+            .in('session_id', allSessionIds)
+
+          const total = allSessionIds.length
+          const attended = (studentRecords || []).filter(r => wasAttended(r.status)).length
+          const newPercentage = total > 0 ? (attended / total) * 100 : 100
+
+          // 3. Check if they were >= 60% BEFORE this update
+          // We can approximate this by checking the percentage WITHOUT the current session's record
+          const currentStatus = attendanceMap[studentId]
+          const attendedThisSession = wasAttended(currentStatus)
+          
+          const prevTotal = total - 1
+          const prevAttended = attended - (attendedThisSession ? 1 : 0)
+          const prevPercentage = prevTotal > 0 ? (prevAttended / prevTotal) * 100 : 100
+
+          if (prevPercentage >= 60 && newPercentage < 60) {
+            const notificationDb = supabaseAdmin || req.supabase
+            const notificationType = 'low_attendance_60'
+            let alreadyNotified = false
+
+            if (notificationDb) {
+              const { data: existingLog, error: logError } = await notificationDb
+                .from('attendance_notification_logs')
+                .select('id')
+                .eq('student_id', studentId)
+                .eq('class_section_id', sectionId)
+                .eq('notification_type', notificationType)
+                .maybeSingle()
+
+              if (logError) {
+                console.error('[notification] Log lookup failed:', logError)
+              } else if (existingLog) {
+                alreadyNotified = true
+              }
+            }
+
+            if (alreadyNotified) continue
+
+            const { data: profile } = await req.supabase
+              .from('profiles')
+              .select('email, full_name')
+              .eq('id', studentId)
+              .single()
+
+            if (profile?.email) {
+              const emailResult = await sendEmail({
+                to: profile.email,
+                subject: `Low Attendance Alert: ${course.name}`,
+                html: `
+                  <div style="font-family: sans-serif; line-height: 1.5; color: #333;">
+                    <h2>Attendance Alert</h2>
+                    <p>Hello <strong>${profile.full_name || 'Student'}</strong>,</p>
+                    <p>Your attendance in <strong>${course.name} (${course.code})</strong> has fallen below the required <strong>60%</strong> threshold.</p>
+                    <div style="background: #fff5f5; border: 1px solid #feb2b2; padding: 15px; border-radius: 8px; margin: 20px 0;">
+                      <p style="margin: 0;">Current Attendance: <strong style="color: #c53030;">${Math.round(newPercentage)}%</strong></p>
+                      <p style="margin: 5px 0 0 0;">Subject Teacher: <strong>${teacherName}</strong></p>
+                    </div>
+                    <p>Regular attendance is crucial for your academic performance. Please ensure you attend future classes to improve your percentage.</p>
+                    <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
+                    <p style="font-size: 12px; color: #777;">This is an automated notification from the Centralized Attendance Portal.</p>
+                  </div>
+                `
+              })
+
+              if (emailResult?.success && notificationDb) {
+                const { error: insertError } = await notificationDb
+                  .from('attendance_notification_logs')
+                  .insert({
+                    student_id: studentId,
+                    class_section_id: sectionId,
+                    course_id: course?.id || null,
+                    teacher_id: sessionData.teacher_id || null,
+                    notification_type: notificationType,
+                    attendance_percent: Math.round(newPercentage),
+                  })
+
+                if (insertError) {
+                  console.error('[notification] Log insert failed:', insertError)
+                }
+              }
+            }
+          }
+        }
+      }
+    } catch (notifErr) {
+      console.error('[notification] Error checking attendance threshold:', notifErr)
+      // Don't fail the request if notification fails
+    }
+
     return res.json({ data })
   } catch (err) {
     console.error('POST /attendance/sessions/:id/records error:', err)

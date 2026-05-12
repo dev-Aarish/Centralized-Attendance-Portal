@@ -232,7 +232,7 @@ router.get('/stats', async (req, res) => {
       .select('id')
       .eq('session_date', today)
 
-    // Get low attendance students (< 75%)
+    // Get low attendance students (< 60%)
     const { data: students } = await supabase
       .from('student_profiles')
       .select('id')
@@ -247,7 +247,7 @@ router.get('/stats', async (req, res) => {
       if (records && records.length > 0) {
         const presentCount = records.filter((r) => r.status === 'present').length
         const attendancePercent = (presentCount / records.length) * 100
-        if (attendancePercent < 75) lowAttendanceCount++
+        if (attendancePercent < 60) lowAttendanceCount++
       }
     }
 
@@ -944,7 +944,7 @@ router.get('/attendance/report', async (req, res) => {
 
 /**
  * GET /api/v1/admin/alerts/low-attendance
- * Get all students with attendance < 75%
+ * Get all students with attendance < 60%
  * Query: ?department=CSE (optional filter)
  */
 router.get('/alerts/low-attendance', async (req, res) => {
@@ -986,7 +986,7 @@ router.get('/alerts/low-attendance', async (req, res) => {
         const presentCount = records.filter((r) => r.status === 'present').length
         const attendancePercent = (presentCount / records.length) * 100
 
-        if (attendancePercent < 75) {
+        if (attendancePercent < 60) {
           alerts.push({
             studentId: student.profile_id,
             name: student.profiles?.full_name,

@@ -65,7 +65,19 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: 'Internal server error' })
 })
 
-app.listen(PORT, () => {
-  console.log(`🚀 Backend server running on http://localhost:${PORT}`)
-  console.log(`   Health check: http://localhost:${PORT}/api/health`)
+// Catch unhandled errors to prevent silent crashes
+process.on('uncaughtException', (err) => {
+  console.error('[FATAL] Uncaught exception:', err)
+})
+process.on('unhandledRejection', (reason) => {
+  console.error('[FATAL] Unhandled rejection:', reason)
+})
+
+// Express 5 app.listen() returns a Promise — must await it
+const server = await app.listen(PORT)
+console.log(`🚀 Backend server running on http://localhost:${PORT}`)
+console.log(`   Health check: http://localhost:${PORT}/api/health`)
+
+server.on('close', () => {
+  console.log('[server] HTTP server closed')
 })

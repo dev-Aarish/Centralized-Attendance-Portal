@@ -608,7 +608,9 @@ export default function TeacherAttendance() {
                           </div>
                           <div>
                             <p className="text-sm font-semibold text-gray-900 dark:text-white">{fullName}</p>
-                            <p className="text-xs text-gray-500 mt-0.5">{s.student_profiles?.roll_number || 'N/A'}</p>
+                            <div className="flex items-center gap-2">
+                              <p className="text-xs text-gray-500 mt-0.5">{s.student_profiles?.roll_number || 'N/A'}</p>
+                            </div>
                           </div>
                         </div>
                         <div className="flex gap-2 self-end sm:self-auto">
