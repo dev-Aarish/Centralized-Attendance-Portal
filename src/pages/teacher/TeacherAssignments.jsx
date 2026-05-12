@@ -1,4 +1,5 @@
 import { useEffect, useState } from 'react'
+import { useNavigate } from 'react-router-dom'
 import AppLayout from '../../components/shared/AppLayout'
 import { getMyAssignedSections } from '../../lib/profile'
 import {
@@ -11,6 +12,7 @@ import {
 import { apiFetch } from '../../lib/api'
 
 export default function TeacherAssignments() {
+  const QUESTION_SELECTION_KEY = 'teacher-assignment-question-selection'
   const [sections, setSections] = useState([])
   const [selectedSection, setSelectedSection] = useState('')
   const [assignments, setAssignments] = useState([])
@@ -27,6 +29,10 @@ export default function TeacherAssignments() {
   const [formAttendanceThreshold, setFormAttendanceThreshold] = useState(75)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
+  const [selectedTopics, setSelectedTopics] = useState([])
+  const [includeUntagged, setIncludeUntagged] = useState(false)
+  const [selectedQuestionIds, setSelectedQuestionIds] = useState([])
+  const [difficultyCounts, setDifficultyCounts] = useState({ easy: 0, medium: 0, hard: 0 })
 
   // Submissions viewing
   const [viewSubmissionsId, setViewSubmissionsId] = useState(null)
@@ -39,6 +45,7 @@ export default function TeacherAssignments() {
   const [qText, setQText] = useState('')
   const [qTopic, setQTopic] = useState('')
   const [qDifficulty, setQDifficulty] = useState('medium')
+  const navigate = useNavigate()
 
   useEffect(() => {
     async function load() {
@@ -82,11 +89,142 @@ export default function TeacherAssignments() {
       return
     }
     setQuestions(data || [])
+    hydrateSelection(selectedSection)
+  }
+
+  const normalizedTopics = Array.from(
+    new Set((questions || []).map((q) => (q.topic || '').trim()).filter(Boolean))
+  ).sort((a, b) => a.localeCompare(b))
+
+  const selectedQuestionSet = new Set(selectedQuestionIds)
+  const questionPool = buildQuestionPool()
+
+  function isTopicSelected(topic) {
+    return selectedTopics.includes(topic)
+  }
+
+  function toggleTopic(topic) {
+    setSelectedTopics((prev) => (prev.includes(topic) ? prev.filter((t) => t !== topic) : [...prev, topic]))
+  }
+
+  function hydrateSelection(sectionId) {
+    let next = {
+      selectedTopics: [],
+      includeUntagged: false,
+      selectedQuestionIds: [],
+      difficultyCounts: { easy: 0, medium: 0, hard: 0 },
+    }
+    try {
+      const raw = sessionStorage.getItem(QUESTION_SELECTION_KEY)
+      if (raw) {
+        const parsed = JSON.parse(raw)
+        if (parsed?.sectionId === sectionId) {
+          next = {
+            selectedTopics: parsed.selectedTopics || [],
+            includeUntagged: Boolean(parsed.includeUntagged),
+            selectedQuestionIds: parsed.selectedQuestionIds || [],
+            difficultyCounts: parsed.difficultyCounts || { easy: 0, medium: 0, hard: 0 },
+          }
+        }
+      }
+    } catch {
+      // ignore storage errors
+    }
+
+    setSelectedTopics(next.selectedTopics)
+    setIncludeUntagged(next.includeUntagged)
+    setSelectedQuestionIds(next.selectedQuestionIds)
+    setDifficultyCounts(next.difficultyCounts)
+  }
+
+  function persistSelection(sectionId) {
+    try {
+      sessionStorage.setItem(QUESTION_SELECTION_KEY, JSON.stringify({
+        sectionId,
+        selectedTopics,
+        includeUntagged,
+        selectedQuestionIds,
+        difficultyCounts,
+      }))
+    } catch {
+      // ignore storage errors
+    }
+  }
+
+  function handleManageQuestions() {
+    if (!selectedSection) return
+    persistSelection(selectedSection)
+    navigate(`/assignments/questions?sectionId=${encodeURIComponent(selectedSection)}`)
+  }
+
+  function clampToInt(value) {
+    const parsed = parseInt(value, 10)
+    return Number.isFinite(parsed) && parsed >= 0 ? parsed : 0
+  }
+
+  function normalizeDifficultyCounts(total) {
+    const counts = {
+      easy: clampToInt(difficultyCounts.easy),
+      medium: clampToInt(difficultyCounts.medium),
+      hard: clampToInt(difficultyCounts.hard),
+    }
+    let sum = counts.easy + counts.medium + counts.hard
+    if (sum <= total) return { counts, remaining: total - sum }
+
+    const order = ['hard', 'medium', 'easy']
+    let idx = 0
+    while (sum > total) {
+      const key = order[idx % order.length]
+      if (counts[key] > 0) {
+        counts[key] -= 1
+        sum -= 1
+      }
+      idx += 1
+    }
+    return { counts, remaining: 0 }
+  }
+
+  function buildQuestionPool() {
+    if (!selectedTopics.length && selectedQuestionIds.length === 0) return questions
+
+    return questions.filter((q) => {
+      if (selectedQuestionSet.has(q.id)) return true
+      const topic = (q.topic || '').trim()
+      if (!topic && includeUntagged) return true
+      return topic && selectedTopics.includes(topic)
+    })
+  }
+
+  function pickRandomQuestions(pool, total) {
+    const byDifficulty = {
+      easy: pool.filter((q) => (q.difficulty || '').toLowerCase() === 'easy'),
+      medium: pool.filter((q) => !q.difficulty || (q.difficulty || '').toLowerCase() === 'medium'),
+      hard: pool.filter((q) => (q.difficulty || '').toLowerCase() === 'hard'),
+    }
+
+    const { counts, remaining } = normalizeDifficultyCounts(total)
+    const selected = []
+
+    Object.entries(counts).forEach(([level, count]) => {
+      if (count <= 0) return
+      const shuffled = [...byDifficulty[level]].sort(() => Math.random() - 0.5)
+      selected.push(...shuffled.slice(0, count))
+    })
+
+    const selectedIds = new Set(selected.map((q) => q.id))
+    if (remaining > 0) {
+      const leftovers = pool.filter((q) => !selectedIds.has(q.id))
+      const shuffled = [...leftovers].sort(() => Math.random() - 0.5)
+      selected.push(...shuffled.slice(0, remaining))
+    }
+
+    return selected.slice(0, total)
   }
 
   async function handleCreateAssignment() {
     if (!formTitle.trim()) return setError('Title is required.')
-    if (questions.length < formCount) return setError(`Not enough questions in bank. Add at least ${formCount}.`)
+    const pool = buildQuestionPool()
+    if (pool.length < formCount) return setError(`Not enough questions for the selected filters. Need ${formCount}, found ${pool.length}.`)
     setError(null)
     setSubmitting(true)
 
@@ -105,11 +243,9 @@ export default function TeacherAssignments() {
       return
     }
 
-    // Randomly select questions
-    const shuffledQuestionIds = [...questions]
-      .sort(() => Math.random() - 0.5)
-      .slice(0, formCount)
-      .map((q) => q.id)
+    // Randomly select questions from the filtered pool
+    const selectedQuestions = pickRandomQuestions(pool, formCount)
+    const shuffledQuestionIds = selectedQuestions.map((q) => q.id)
 
     if (shuffledQuestionIds.length > 0) {
       const { error: linkError } = await linkQuestionsToAssignment(assignment.id, shuffledQuestionIds)
@@ -259,14 +395,97 @@ export default function TeacherAssignments() {
                           value={formCount}
                           onChange={(e) => setFormCount(Number(e.target.value))}
                           min={1}
-                          max={questions.length}
+                          max={questionPool.length}
                           className="w-24 px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                         />
                       </div>
                     </div>
                     <p className="text-xs text-gray-400">
-                      {questions.length} questions available in bank · {formCount} will be randomly selected
+                      {questionPool.length} in filtered pool · {questions.length} in bank · {formCount} will be randomly selected
                     </p>
+                    <div className="grid grid-cols-1 lg:grid-cols-2 gap-4">
+                      <div className="bg-gray-50 dark:bg-gray-800/60 border border-gray-100 dark:border-gray-800 rounded-xl p-3">
+                        <p className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-2">Topic filters</p>
+                        <div className="flex flex-col gap-2 max-h-44 overflow-y-auto custom-scrollbar pr-1">
+                          {normalizedTopics.length === 0 && (
+                            <p className="text-xs text-gray-400">No topics found in this bank.</p>
+                          )}
+                          {normalizedTopics.map((topic) => (
+                            <label key={topic} className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+                              <input
+                                type="checkbox"
+                                checked={isTopicSelected(topic)}
+                                onChange={() => toggleTopic(topic)}
+                                className="h-4 w-4 rounded border-gray-300 dark:border-gray-700"
+                              />
+                              <span className="truncate">{topic}</span>
+                            </label>
+                          ))}
+                          <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+                            <input
+                              type="checkbox"
+                              checked={includeUntagged}
+                              onChange={() => setIncludeUntagged((prev) => !prev)}
+                              className="h-4 w-4 rounded border-gray-300 dark:border-gray-700"
+                            />
+                            <span>Include untagged questions</span>
+                          </label>
+                        </div>
+                      </div>
+                      <div className="bg-gray-50 dark:bg-gray-800/60 border border-gray-100 dark:border-gray-800 rounded-xl p-3">
+                        <p className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-2">Difficulty split</p>
+                        <div className="flex flex-col gap-2">
+                          <label className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-300">
+                            Easy
+                            <input
+                              type="number"
+                              min={0}
+                              value={difficultyCounts.easy}
+                              onChange={(e) => setDifficultyCounts((prev) => ({ ...prev, easy: clampToInt(e.target.value) }))}
+                              className="w-16 px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-xs text-gray-900 dark:text-white"
+                            />
+                          </label>
+                          <label className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-300">
+                            Medium
+                            <input
+                              type="number"
+                              min={0}
+                              value={difficultyCounts.medium}
+                              onChange={(e) => setDifficultyCounts((prev) => ({ ...prev, medium: clampToInt(e.target.value) }))}
+                              className="w-16 px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-xs text-gray-900 dark:text-white"
+                            />
+                          </label>
+                          <label className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-300">
+                            Hard
+                            <input
+                              type="number"
+                              min={0}
+                              value={difficultyCounts.hard}
+                              onChange={(e) => setDifficultyCounts((prev) => ({ ...prev, hard: clampToInt(e.target.value) }))}
+                              className="w-16 px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-xs text-gray-900 dark:text-white"
+                            />
+                          </label>
+                          <p className="text-[11px] text-gray-400">
+                            If totals exceed {formCount}, counts are auto-adjusted.
+                          </p>
+                        </div>
+                      </div>
+                    </div>
+                    <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 rounded-xl border border-gray-100 dark:border-gray-800 bg-gray-50 dark:bg-gray-800/60 px-4 py-3">
+                      <div>
+                        <p className="text-xs font-semibold text-gray-600 dark:text-gray-300">Selected questions</p>
+                        <p className="text-[11px] text-gray-400">
+                          {selectedQuestionIds.length} manually selected · {questionPool.length} in pool
+                        </p>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={handleManageQuestions}
+                        className="text-xs px-3 py-2 rounded-lg bg-blue-500 hover:bg-blue-600 text-white font-medium transition-colors"
+                      >
+                        Manage questions
+                      </button>
+                    </div>
                     {error && <p className="text-xs text-red-500">{error}</p>}
                     <button
                       onClick={handleCreateAssignment}

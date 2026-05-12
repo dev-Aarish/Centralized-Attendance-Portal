@@ -57,6 +57,9 @@ export default function AdminSchedule() {
   const [actionWarning, setActionWarning] = useState(null)
   const editPopoverRef = useRef(null)
   const trackRefs = useRef({})
+  const schedulesFetchId = useRef(0)
+  const workloadFetchId = useRef(0)
+  const [workloadReady, setWorkloadReady] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
   const [modalTitle, setModalTitle] = useState('')
   const [modalBody, setModalBody] = useState(null)
@@ -98,11 +101,15 @@ export default function AdminSchedule() {
       fetchRoutines();
       setSuccessMsg(null);
       setError(null);
+      setTeacherWorkloadWarning(null);
+      setWorkloadReady(false);
     } else {
       setCohort(null);
       setRoutines([]);
       setSelectedRoutineId('');
       setGridSchedules([]);
+      setTeacherWorkloadWarning(null);
+      setWorkloadReady(false);
     }
   }, [selectedYear, selectedSection, allSections])
 
@@ -118,9 +125,11 @@ export default function AdminSchedule() {
     if (!selectedRoutineId || !cohort?.classSections?.length) {
       setTeacherBaseWorkloadMap({})
       setTeacherBaseWorkloadDetailsMap({})
+      setTeacherWorkloadWarning(null)
+      setWorkloadReady(false)
       return
     }
-
+    setWorkloadReady(false)
     fetchTeacherBaseWorkloads(cohort.classSections.map((section) => section.id))
   }, [selectedRoutineId, cohort])
 
@@ -148,12 +157,14 @@ export default function AdminSchedule() {
 
   async function fetchTeacherBaseWorkloads(sectionIds = []) {
     try {
+      const fetchId = ++workloadFetchId.current
       const scopedSectionIds = Array.isArray(sectionIds) ? sectionIds.filter(Boolean) : []
       const querySuffix = scopedSectionIds.length > 0 ? `?excludeSectionIds=${encodeURIComponent(scopedSectionIds.join(','))}` : ''
       const response = await apiFetch(`/api/v1/admin/teachers/workload${querySuffix}`, {
         cache: false,
         forceRefresh: true,
       })
+      if (fetchId !== workloadFetchId.current) return { map: {}, detailsMap: {} }
 
       const map = {}
       const detailsMap = {}
@@ -167,11 +178,13 @@ export default function AdminSchedule() {
       }
       setTeacherBaseWorkloadMap(map)
       setTeacherBaseWorkloadDetailsMap(detailsMap)
+      setWorkloadReady(true)
       return { map, detailsMap }
     } catch (err) {
       console.error('Error fetching teacher workloads:', err)
       setTeacherBaseWorkloadMap({})
       setTeacherBaseWorkloadDetailsMap({})
+      setWorkloadReady(false)
       return { map: {}, detailsMap: {} }
     }
   }
@@ -214,7 +227,7 @@ export default function AdminSchedule() {
   const overloadedTeachersPreview = buildOverloadedTeachersPreview(teacherBaseWorkloadMap, teacherBaseWorkloadDetailsMap, gridSchedules)
 
   useEffect(() => {
-    if (overloadedTeachersPreview.length === 0) {
+    if (!workloadReady || loading || overloadedTeachersPreview.length === 0) {
       setTeacherWorkloadWarning(null)
       return
     }
@@ -285,8 +298,10 @@ export default function AdminSchedule() {
     if (routines.length > 0 && !selectedRoutineId) return
     if (!selectedYear || !selectedSection) return
     const yearNum = parseInt(selectedYear)
+    const fetchId = ++schedulesFetchId.current
     try {
       setLoading(true)
+      setError(null)
       // If we have a cohort with classSections, use them. 
       // Otherwise, we'll just fetch based on Year/Section (for routines that already have schedules)
       const sectionIds = cohort?.classSections?.map(cs => cs.id).join(',')
@@ -295,6 +310,7 @@ export default function AdminSchedule() {
         cache: false,
         forceRefresh: true,
       })
+      if (fetchId !== schedulesFetchId.current) return
       const formatted = (data.data || []).map(s => {
         const timeParts = s.timeSlot.split('-')
         const startHour = parseInt(timeParts[0].split(':')[0])
@@ -317,7 +333,13 @@ export default function AdminSchedule() {
         }
       })
       setGridSchedules(uniqueFormatted)
-    } catch (err) { setError('Failed to load existing schedule') } finally { setLoading(false) }
+      setError(null)
+    } catch (err) {
+      if (fetchId !== schedulesFetchId.current) return
+      setError('Failed to load existing schedule')
+    } finally {
+      if (fetchId === schedulesFetchId.current) setLoading(false)
+    }
   }
 
   async function handleCreateRoutine(copySource = null) {

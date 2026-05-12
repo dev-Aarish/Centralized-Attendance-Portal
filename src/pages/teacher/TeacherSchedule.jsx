@@ -78,11 +78,16 @@ export default function TeacherSchedule() {
 
   useEffect(() => {
     setMounted(true);
-    fetchSchedule();
   }, []);
+
+  useEffect(() => {
+    if (!user) return;
+    fetchSchedule();
+  }, [user]);
 
   async function fetchSchedule() {
     try {
+      setLoading(true);
       setError(null);
       const data = await apiFetch('/api/v1/schedules/teacher', {
         cache: true,
@@ -472,11 +477,6 @@ export default function TeacherSchedule() {
                 <div className="mb-5">
                   <div className="flex items-center gap-3 mb-1.5">
                     <h3 className="text-xl font-bold text-white tracking-tight">{block.code}</h3>
-                    {blockPalette && (
-                      <span className={`text-[10px] font-bold px-2 py-0.5 rounded-full border ${blockPalette.badge}`}>
-                        {block.department || ''} Y{block.yearOfStudy || '?'} · Sec {block.section || '—'}
-                      </span>
-                    )}
                   </div>
                   <p className="text-sm text-slate-300 leading-relaxed">{block.title || 'Untitled Course'}</p>
                 </div>
@@ -518,16 +518,6 @@ export default function TeacherSchedule() {
                     </div>
                   </div>
 
-                  {/* Duration */}
-                  <div className="flex items-center gap-3 bg-slate-800/50 rounded-xl px-4 py-3 border border-slate-700/40">
-                    <div className="p-2 rounded-lg bg-slate-700/60">
-                      <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" className="w-4 h-4 text-purple-400"><rect width="18" height="18" x="3" y="4" rx="2" ry="2" /><line x1="16" x2="16" y1="2" y2="6" /><line x1="8" x2="8" y1="2" y2="6" /><line x1="3" x2="21" y1="10" y2="10" /></svg>
-                    </div>
-                    <div>
-                      <p className="text-[11px] text-slate-500 font-semibold uppercase tracking-wider">Duration</p>
-                      <p className="text-sm text-slate-200 font-medium">{block.duration} hour{block.duration > 1 ? 's' : ''}</p>
-                    </div>
-                  </div>
                 </div>
               </div>
 

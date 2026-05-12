@@ -1,10 +1,13 @@
 import { useEffect, useState } from 'react'
+import { useSearchParams } from 'react-router-dom'
 import AppLayout from '../../components/shared/AppLayout'
 import { getMyAssignedSections, getStudentsInSection } from '../../lib/profile'
 import { getSessionsForSection, getRecordsForSession } from '../../lib/attendance'
 import SpiralLoader from '../../components/shared/Loader'
 
 export default function TeacherCourses() {
+  const [searchParams, setSearchParams] = useSearchParams()
+  const selectedSectionId = searchParams.get('sectionId') || ''
   const [sections, setSections] = useState([])
   const [selected, setSelected] = useState(null)
   const [students, setStudents] = useState([])
@@ -23,10 +26,22 @@ export default function TeacherCourses() {
     load()
   }, [])
 
+  useEffect(() => {
+    if (loading || !selectedSectionId || selected) return
+    const match = sections.find((s) => (s.class_section_id || s.id) === selectedSectionId)
+    if (match) {
+      handleSelect(match)
+    }
+  }, [loading, selectedSectionId, sections, selected])
+
   async function handleSelect(section) {
     setSelected(section)
     setLoadingDetail(true)
     setExportError(null)
+    const sectionId = section.class_section_id || section.id
+    if (sectionId) {
+      setSearchParams({ sectionId }, { replace: true })
+    }
     const [{ data: studentData }, { data: sessionData }] = await Promise.all([
       getStudentsInSection(section.class_section_id),
       getSessionsForSection(section.class_section_id),
@@ -332,7 +347,7 @@ export default function TeacherCourses() {
             <div className="flex items-center justify-between">
               <div>
                 <button
-                  onClick={() => { setSelected(null); setStudents([]); setSessions([]) }}
+                  onClick={() => { setSelected(null); setStudents([]); setSessions([]); setSearchParams({}, { replace: true }) }}
                   className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 mb-2 transition-colors"
                 >
                   ← Back to courses

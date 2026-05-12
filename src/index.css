@@ -12,6 +12,8 @@
   --accent-bg: rgba(170, 59, 255, 0.1);
   --accent-border: rgba(170, 59, 255, 0.5);
   --social-bg: rgba(244, 243, 236, 0.5);
+  --sidebar-width: 208px;
+  --sidebar-border: 1px;
   --shadow:
     rgba(0, 0, 0, 0.1) 0 10px 15px -3px, rgba(0, 0, 0, 0.05) 0 4px 6px -2px;
 
@@ -31,6 +33,12 @@
 
   @media (max-width: 1024px) {
     font-size: 16px;
+  }
+}
+
+@media (max-width: 767px) {
+  :root {
+    --sidebar-width: 0px;
   }
 }
 
@@ -149,6 +157,17 @@ code {
 .custom-scrollbar::-webkit-scrollbar-thumb {
   background: rgba(150, 150, 150, 0.2);
   border-radius: 10px;
+}
+
+.attendance-submit-bar {
+  left: 0;
+}
+
+@media (min-width: 768px) {
+  .attendance-submit-bar {
+    left: calc(var(--sidebar-width, 0px) + var(--sidebar-border, 0px));
+    width: calc(100% - var(--sidebar-width, 0px) - var(--sidebar-border, 0px));
+  }
 }
 
 /* ── Premium Dashboard Animations ─────────────────────────────── */

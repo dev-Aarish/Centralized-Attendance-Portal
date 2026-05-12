@@ -1,4 +1,4 @@
-import { useState } from 'react'
+import { useEffect, useState } from 'react'
 import { NavLink } from 'react-router-dom'
 import { useAuth } from '../../hooks/useAuth'
 
@@ -48,6 +48,15 @@ export default function Sidebar() {
   const [collapsed, setCollapsed] = useState(() => {
     try { return localStorage.getItem('sidebar-collapsed') === 'true' } catch { return false }
   })
+
+  useEffect(() => {
+    try {
+      const width = collapsed ? 60 : 208
+      document.documentElement.style.setProperty('--sidebar-width', `${width}px`)
+    } catch {
+      // no-op
+    }
+  }, [collapsed])
 
   function toggleCollapsed() {
     setCollapsed((prev) => {

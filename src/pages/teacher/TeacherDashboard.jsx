@@ -282,7 +282,7 @@ export default function TeacherDashboard() {
               {sections.map((s) => (
                 <div
                   key={s.id}
-                  onClick={() => navigate('/courses')}
+                  onClick={() => navigate(`/courses?sectionId=${encodeURIComponent(s.class_section_id || s.id)}`)}
                   className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl px-5 py-4 cursor-pointer hover:border-gray-200 dark:hover:border-gray-700 transition-colors"
                 >
                   <p className="text-sm font-medium text-gray-800 dark:text-white">

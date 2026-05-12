@@ -107,7 +107,6 @@ export default function TeacherAttendance() {
   const [activeSection, setActiveSection] = useState(null)
   const [students, setStudents] = useState([])
   const [attendance, setAttendance] = useState({})
-  const [isBunk, setIsBunk] = useState(false)
   const [loadingStudents, setLoadingStudents] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [error, setError] = useState(null)
@@ -267,7 +266,6 @@ export default function TeacherAttendance() {
     setIsSessionActive(true)
     setLoadingStudents(true)
     setAttendance({})
-    setIsBunk(false)
     setError(null)
 
     const studentsRes = await getStudentsInSection(section.class_section_id)
@@ -294,7 +292,6 @@ export default function TeacherAttendance() {
     setActiveSection(null)
     setStudents([])
     setAttendance({})
-    setIsBunk(false)
     setError(null)
   }
 
@@ -306,16 +303,6 @@ export default function TeacherAttendance() {
     const all = {}
     students.forEach((s) => {
       all[s.student_profiles.id] = status
-    })
-    setAttendance(all)
-    setIsBunk(false)
-  }
-
-  function handleMarkBunk() {
-    setIsBunk(true)
-    const all = {}
-    students.forEach((s) => {
-      all[s.student_profiles.id] = 'absent'
     })
     setAttendance(all)
   }
@@ -351,7 +338,6 @@ export default function TeacherAttendance() {
       setSelectedSectionId('')
       setAttendance({})
       setStudents([])
-      setIsBunk(false)
     } catch (err) {
       setError(err?.message || 'Something went wrong while submitting attendance.')
     } finally {
@@ -579,15 +565,6 @@ export default function TeacherAttendance() {
                   >
                     Mark All Absent
                   </button>
-                  <button
-                    onClick={handleMarkBunk}
-                    className={`flex-1 sm:flex-none text-sm px-4 py-2 rounded-xl font-medium transition-colors border ${isBunk
-                      ? 'bg-red-500 text-white border-red-600 shadow-md shadow-red-500/20'
-                      : 'bg-orange-50 hover:bg-orange-100 dark:bg-orange-900/20 dark:hover:bg-orange-900/40 text-orange-700 dark:text-orange-400 border-orange-200 dark:border-orange-800/30'
-                    }`}
-                  >
-                    {isBunk ? 'Marked as Bunk' : 'Mark as Mass Bunk'}
-                  </button>
                 </div>
 
                 <div className="flex flex-col gap-2">
@@ -615,7 +592,7 @@ export default function TeacherAttendance() {
                         </div>
                         <div className="flex gap-2 self-end sm:self-auto">
                           <button
-                            onClick={() => { setIsBunk(false); toggle(studentId, 'present') }}
+                            onClick={() => { toggle(studentId, 'present') }}
                             className={`w-12 h-10 rounded-xl flex items-center justify-center font-bold transition-colors border ${status === 'present'
                               ? 'bg-green-500 text-white border-green-600 shadow-md shadow-green-500/20'
                               : 'bg-gray-50 dark:bg-gray-800 text-gray-400 border-gray-200 dark:border-gray-700 hover:border-green-300 dark:hover:border-green-800'
@@ -624,7 +601,7 @@ export default function TeacherAttendance() {
                             P
                           </button>
                           <button
-                            onClick={() => { setIsBunk(false); toggle(studentId, 'absent') }}
+                            onClick={() => { toggle(studentId, 'absent') }}
                             className={`w-12 h-10 rounded-xl flex items-center justify-center font-bold transition-colors border ${status === 'absent'
                               ? 'bg-red-500 text-white border-red-600 shadow-md shadow-red-500/20'
                               : 'bg-gray-50 dark:bg-gray-800 text-gray-400 border-gray-200 dark:border-gray-700 hover:border-red-300 dark:hover:border-red-800'
@@ -633,7 +610,7 @@ export default function TeacherAttendance() {
                             A
                           </button>
                           <button
-                            onClick={() => { setIsBunk(false); toggle(studentId, 'late') }}
+                            onClick={() => { toggle(studentId, 'late') }}
                             className={`w-12 h-10 rounded-xl flex items-center justify-center font-bold transition-colors border ${status === 'late'
                               ? 'bg-amber-500 text-white border-amber-600 shadow-md shadow-amber-500/20'
                               : 'bg-gray-50 dark:bg-gray-800 text-gray-400 border-gray-200 dark:border-gray-700 hover:border-amber-300 dark:hover:border-amber-800'
@@ -655,25 +632,25 @@ export default function TeacherAttendance() {
                 <div className="h-28 sm:h-20" />
 
                 {/* Fixed submission bar — sits above BottomNav on mobile */}
-                <div className="fixed bottom-16 md:bottom-0 left-0 right-0 bg-gray-900/95 dark:bg-white/95 backdrop-blur-md border-t border-gray-800 dark:border-gray-200 px-4 py-3 sm:p-4 flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-0 shadow-xl shadow-black/10 dark:shadow-white/10 z-40">
+                <div className="attendance-submit-bar fixed bottom-16 md:bottom-0 right-0 bg-slate-900/95 dark:bg-slate-900/95 backdrop-blur-md border-t border-slate-800/80 px-4 py-3 sm:p-4 flex flex-col sm:flex-row items-center justify-between gap-3 sm:gap-0 shadow-xl shadow-black/20 z-40">
                   <div className="flex gap-5 sm:gap-4">
                     <div className="flex flex-col items-center sm:items-start">
-                      <span className="text-[10px] sm:text-xs text-gray-400 dark:text-gray-500">Present</span>
-                      <span className="text-base sm:text-lg font-bold text-green-400 dark:text-green-600">{presentCount}</span>
+                      <span className="text-[10px] sm:text-xs text-slate-400">Present</span>
+                      <span className="text-base sm:text-lg font-bold text-green-300">{presentCount}</span>
                     </div>
                     <div className="flex flex-col items-center sm:items-start">
-                      <span className="text-[10px] sm:text-xs text-gray-400 dark:text-gray-500">Absent</span>
-                      <span className="text-base sm:text-lg font-bold text-red-400 dark:text-red-600">{absentCount}</span>
+                      <span className="text-[10px] sm:text-xs text-slate-400">Absent</span>
+                      <span className="text-base sm:text-lg font-bold text-red-300">{absentCount}</span>
                     </div>
                     <div className="flex flex-col items-center sm:items-start">
-                      <span className="text-[10px] sm:text-xs text-gray-400 dark:text-gray-500">Unmarked</span>
-                      <span className="text-base sm:text-lg font-bold text-gray-300 dark:text-gray-700">{unmarkedCount}</span>
+                      <span className="text-[10px] sm:text-xs text-slate-400">Unmarked</span>
+                      <span className="text-base sm:text-lg font-bold text-slate-200">{unmarkedCount}</span>
                     </div>
                   </div>
                   <button
                     onClick={handleSubmit}
                     disabled={!allMarked || submitting}
-                    className="w-full sm:w-auto px-6 py-2.5 sm:py-3 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:bg-gray-700 disabled:text-gray-500 text-white text-sm sm:text-base font-semibold transition-colors disabled:cursor-not-allowed shadow-lg shadow-blue-600/30 disabled:shadow-none"
+                    className="w-full sm:w-auto px-6 py-2.5 sm:py-3 rounded-xl bg-blue-600 hover:bg-blue-500 disabled:bg-slate-800 disabled:text-slate-500 text-white text-sm sm:text-base font-semibold transition-colors disabled:cursor-not-allowed shadow-lg shadow-blue-600/30 disabled:shadow-none"
                   >
                     {submitting ? 'Submitting...' : 'Submit Records'}
                   </button>
