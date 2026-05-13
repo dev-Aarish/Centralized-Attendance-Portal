@@ -30,6 +30,18 @@ function parseTimeSlotEnd(timeSlot) {
   return `${String(hours).padStart(2, '0')}:${String(minutes).padStart(2, '0')}`
 }
 
+function getCourseFromSchedule(schedule) {
+  return schedule.courses || schedule.class_sections?.courses || null
+}
+
+function resolveTeacherId(schedule) {
+  return schedule.teacher_id || schedule.class_sections?.teacher_assignments?.[0]?.teacher_id || null
+}
+
+function buildReminderKey(sectionId, sessionDate, timeSlot) {
+  return `${sectionId}::${sessionDate}::${timeSlot}`
+}
+
 router.post('/attendance-reminders', async (req, res) => {
   try {
     if (!supabaseAdmin) {
@@ -37,81 +49,147 @@ router.post('/attendance-reminders', async (req, res) => {
     }
 
     const todayIst = toIstDateString(new Date())
-    const minDate = toIstDateString(new Date(Date.now() - 24 * 60 * 60 * 1000))
+    const yesterdayIst = toIstDateString(new Date(Date.now() - 24 * 60 * 60 * 1000))
+    const targetDates = [yesterdayIst, todayIst]
 
-    const { data: sessions, error } = await supabaseAdmin
-      .from('attendance_sessions')
-      .select(`
-        id,
-        class_section_id,
-        teacher_id,
-        session_date,
-        time_slot,
-        attendance_records ( id ),
-        class_sections (
+    const schedulesByDate = []
+    for (const dateString of targetDates) {
+      const dayName = getIstDayName(dateString)
+      const { data: schedules, error } = await supabaseAdmin
+        .from('class_schedules')
+        .select(`
           id,
-          section,
-          year_of_study,
-          department,
-          courses ( id, name, code, semester, department, type )
-        ),
-        teacher_profiles (
-          id,
-          profiles ( full_name, email )
-        )
-      `)
-      .gte('session_date', minDate)
-      .lte('session_date', todayIst)
-      .order('session_date', { ascending: true })
+          day,
+          time_slot,
+          room_number,
+          class_section_id,
+          teacher_id,
+          class_routines!inner(is_active),
+          courses ( id, name, code, semester, department, type ),
+          class_sections (
+            id,
+            section,
+            year_of_study,
+            department,
+            courses ( id, name, code, semester, department, type ),
+            teacher_assignments ( teacher_id )
+          )
+        `)
+        .eq('class_routines.is_active', true)
+        .eq('day', dayName)
 
-    if (error) {
-      return res.status(500).json({ error: error.message })
+      if (error) {
+        return res.status(500).json({ error: error.message })
+      }
+
+      schedulesByDate.push({ dateString, dayName, schedules: schedules || [] })
     }
 
-    const candidateSessions = (sessions || []).filter((session) => {
-      if (session.attendance_records && session.attendance_records.length > 0) return false
-      const endTime = parseTimeSlotEnd(session.time_slot)
-      if (!endTime) return false
+    const allSchedules = schedulesByDate.flatMap((entry) =>
+      (entry.schedules || []).map((schedule) => ({ ...schedule, dateString: entry.dateString, dayName: entry.dayName }))
+    )
 
-      const endTimestamp = new Date(`${session.session_date}T${endTime}:00+05:30`)
-      if (Number.isNaN(endTimestamp.getTime())) return false
-
-      const deadline = new Date(endTimestamp.getTime() + REMINDER_DELAY_HOURS * 60 * 60 * 1000)
-      return Date.now() >= deadline.getTime()
-    })
-
-    if (candidateSessions.length === 0) {
+    if (allSchedules.length === 0) {
       return res.json({ sent: 0, skipped: 0, total: 0 })
     }
 
-    const sessionIds = candidateSessions.map((s) => s.id)
+    const sectionIds = Array.from(new Set(allSchedules.map((s) => s.class_section_id).filter(Boolean)))
+    const { data: sessions, error: sessionError } = await supabaseAdmin
+      .from('attendance_sessions')
+      .select('id, class_section_id, session_date, time_slot, attendance_records ( id )')
+      .in('class_section_id', sectionIds)
+      .in('session_date', targetDates)
+
+    if (sessionError) {
+      return res.status(500).json({ error: sessionError.message })
+    }
+
+    const sessionMap = new Map()
+    for (const session of sessions || []) {
+      const key = buildReminderKey(session.class_section_id, session.session_date, session.time_slot)
+      sessionMap.set(key, session)
+    }
+
+    const reminderKeys = allSchedules.map((schedule) =>
+      buildReminderKey(schedule.class_section_id, schedule.dateString, schedule.time_slot)
+    )
+
     const { data: logRows, error: logError } = await supabaseAdmin
       .from('attendance_reminder_logs')
-      .select('session_id')
-      .in('session_id', sessionIds)
+      .select('class_section_id, session_date, time_slot')
+      .in('class_section_id', sectionIds)
+      .in('session_date', targetDates)
 
     if (logError) {
       return res.status(500).json({ error: logError.message })
     }
 
-    const loggedSessionIds = new Set((logRows || []).map((row) => row.session_id))
+    const loggedKeys = new Set(
+      (logRows || []).map((row) => buildReminderKey(row.class_section_id, row.session_date, row.time_slot))
+    )
+
+    const teacherIds = Array.from(
+      new Set(allSchedules.map((s) => resolveTeacherId(s)).filter(Boolean))
+    )
+
+    const { data: teachers, error: teacherError } = await supabaseAdmin
+      .from('teacher_profiles')
+      .select('id, profiles ( full_name, email )')
+      .in('id', teacherIds)
+
+    if (teacherError) {
+      return res.status(500).json({ error: teacherError.message })
+    }
+
+    const teacherMap = new Map()
+    for (const teacher of teachers || []) {
+      teacherMap.set(teacher.id, teacher)
+    }
+
     let sentCount = 0
     let skippedCount = 0
 
-    for (const session of candidateSessions) {
-      if (loggedSessionIds.has(session.id)) {
+    for (const schedule of allSchedules) {
+      const timeSlot = schedule.time_slot
+      const endTime = parseTimeSlotEnd(timeSlot)
+      if (!endTime) {
         skippedCount++
         continue
       }
 
-      const course = session.class_sections?.courses
+      const endTimestamp = new Date(`${schedule.dateString}T${endTime}:00+05:30`)
+      if (Number.isNaN(endTimestamp.getTime())) {
+        skippedCount++
+        continue
+      }
+
+      const deadline = new Date(endTimestamp.getTime() + REMINDER_DELAY_HOURS * 60 * 60 * 1000)
+      if (Date.now() < deadline.getTime()) {
+        skippedCount++
+        continue
+      }
+
+      const reminderKey = buildReminderKey(schedule.class_section_id, schedule.dateString, timeSlot)
+      if (loggedKeys.has(reminderKey)) {
+        skippedCount++
+        continue
+      }
+
+      const session = sessionMap.get(reminderKey)
+      if (session && session.attendance_records && session.attendance_records.length > 0) {
+        skippedCount++
+        continue
+      }
+
+      const course = getCourseFromSchedule(schedule)
       const courseCode = (course?.code || '').trim().toUpperCase()
       if (SPECIAL_CODES.has(courseCode)) {
         skippedCount++
         continue
       }
 
-      const teacher = session.teacher_profiles
+      const teacherId = resolveTeacherId(schedule)
+      const teacher = teacherId ? teacherMap.get(teacherId) : null
       const teacherName = teacher?.profiles?.full_name || 'Teacher'
       const teacherEmail = teacher?.profiles?.email
       if (!teacherEmail) {
@@ -119,20 +197,11 @@ router.post('/attendance-reminders', async (req, res) => {
         continue
       }
 
-      const dayName = getIstDayName(session.session_date)
-      const { data: scheduleRow } = await supabaseAdmin
-        .from('class_schedules')
-        .select('room_number')
-        .eq('class_section_id', session.class_section_id)
-        .eq('day', dayName)
-        .eq('time_slot', session.time_slot)
-        .maybeSingle()
-
-      const roomNumber = scheduleRow?.room_number || 'TBA'
-      const section = session.class_sections?.section || 'N/A'
-      const year = session.class_sections?.year_of_study || 'N/A'
-      const department = session.class_sections?.department || course?.department || 'N/A'
+      const section = schedule.class_sections?.section || 'N/A'
+      const year = schedule.class_sections?.year_of_study || 'N/A'
+      const department = schedule.class_sections?.department || course?.department || 'N/A'
       const semester = course?.semester || 'N/A'
+      const roomNumber = schedule.room_number || 'TBA'
 
       const emailResult = await sendEmail({
         to: teacherEmail,
@@ -148,8 +217,8 @@ router.post('/attendance-reminders', async (req, res) => {
               <p style="margin: 6px 0 0 0;"><strong>Year / Semester:</strong> ${year} / ${semester}</p>
               <p style="margin: 6px 0 0 0;"><strong>Section:</strong> ${section}</p>
               <p style="margin: 6px 0 0 0;"><strong>Room:</strong> ${roomNumber}</p>
-              <p style="margin: 6px 0 0 0;"><strong>Class Date:</strong> ${session.session_date} (${dayName})</p>
-              <p style="margin: 6px 0 0 0;"><strong>Time Slot:</strong> ${session.time_slot}</p>
+              <p style="margin: 6px 0 0 0;"><strong>Class Date:</strong> ${schedule.dateString} (${schedule.dayName})</p>
+              <p style="margin: 6px 0 0 0;"><strong>Time Slot:</strong> ${timeSlot}</p>
             </div>
             <p>Please submit the attendance as soon as possible.</p>
             <hr style="border: 0; border-top: 1px solid #eee; margin: 20px 0;" />
@@ -162,10 +231,12 @@ router.post('/attendance-reminders', async (req, res) => {
         const { error: insertError } = await supabaseAdmin
           .from('attendance_reminder_logs')
           .insert({
-            session_id: session.id,
-            teacher_id: session.teacher_id,
-            class_section_id: session.class_section_id,
+            session_id: session?.id || null,
+            teacher_id: teacherId,
+            class_section_id: schedule.class_section_id,
             reminder_type: 'attendance_missing_3h',
+            session_date: schedule.dateString,
+            time_slot: timeSlot,
           })
 
         if (insertError) {
@@ -178,7 +249,7 @@ router.post('/attendance-reminders', async (req, res) => {
       }
     }
 
-    return res.json({ sent: sentCount, skipped: skippedCount, total: candidateSessions.length })
+    return res.json({ sent: sentCount, skipped: skippedCount, total: allSchedules.length })
   } catch (err) {
     console.error('POST /cron/attendance-reminders error:', err)
     return res.status(500).json({ error: 'Internal server error' })
