@@ -21,6 +21,7 @@ import adminRoutes from './routes/adminRoutes.js'
 import announcementsRoutes from './routes/announcementsRoutes.js'
 import leaveRoutes from './routes/leaveRoutes.js'
 import cronRoutes from './routes/cronRoutes.js'
+import authRoutes from './routes/authRoutes.js'
 
 dotenv.config({ path: path.resolve(__dirname, '../.env') })
 
@@ -54,6 +55,7 @@ app.use('/api/v1/assignments', requireAuth, assignmentRoutes)
 app.use('/api/v1/announcements', requireAuth, announcementsRoutes)
 app.use('/api/v1/leaves', requireAuth, leaveRoutes)
 app.use('/api/v1/admin', requireAuth, requireAdminRole, adminRoutes)
+app.use('/api/v1/auth', requireAuth, authRoutes)
 app.use('/api/cron', requireCronSecret, cronRoutes)
 
 

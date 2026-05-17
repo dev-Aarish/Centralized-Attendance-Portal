@@ -62,11 +62,7 @@ export default function StudentContacts() {
 
   return (
     <AppLayout title="Instructor Contacts">
-      <div className="p-4 md:p-6 max-w-7xl mx-auto space-y-8">
-        <div className="bg-gray-50 dark:bg-gray-800/60 p-6 rounded-2xl shadow-sm border border-gray-200 dark:border-gray-700/50">
-          <h2 className="text-xl font-bold text-gray-900 dark:text-white mb-2">Instructor Contacts</h2>
-          <p className="text-gray-600 dark:text-gray-400">Find contact information for all your lecture instructors.</p>
-        </div>
+      <div className="px-4 py-0 md:px-6 md:py-0 max-w-7xl mx-auto space-y-6">
 
         {loading ? (
           <div className="flex justify-center py-24">
@@ -87,7 +83,11 @@ export default function StudentContacts() {
                 <div className="border-b border-gray-200 dark:border-gray-800 pb-2">
                   <h3 className="text-lg font-bold text-gray-900 dark:text-gray-100 flex items-center gap-2">
                     {subject.subjectName}
-                    <span className="text-xs font-semibold px-2 py-1 bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400 rounded-md">
+                    <span className={`text-xs font-semibold px-2 py-1 rounded-md ${
+                      subject.type === 'Lab' 
+                        ? 'bg-emerald-100 dark:bg-emerald-900/30 text-emerald-700 dark:text-emerald-400' 
+                        : 'bg-blue-100 dark:bg-blue-900/30 text-blue-700 dark:text-blue-400'
+                    }`}>
                       {subject.type}
                     </span>
                   </h3>
@@ -100,11 +100,15 @@ export default function StudentContacts() {
                       className="bg-gray-50 dark:bg-gray-800/80 rounded-2xl p-6 border border-gray-200 dark:border-gray-700/60 shadow-md hover:shadow-lg dark:hover:border-gray-600 transition-all flex flex-col gap-5 relative overflow-hidden group"
                     >
                       {/* Decorative sidebar accent */}
-                      <div className="absolute top-0 left-0 w-1.5 h-full bg-blue-500 rounded-l-2xl opacity-80 group-hover:opacity-100 transition-opacity"></div>
+                      <div className={`absolute top-0 left-0 w-1.5 h-full rounded-l-2xl opacity-80 group-hover:opacity-100 transition-opacity ${
+                        subject.type === 'Lab' ? 'bg-emerald-500' : 'bg-blue-500'
+                      }`}></div>
                       
                       <div>
                         <h4 className="font-bold text-gray-900 dark:text-white text-lg tracking-tight">{teacher.name}</h4>
-                        <p className="text-sm font-semibold text-blue-600 dark:text-blue-400 mb-1">{teacher.role}</p>
+                        <p className={`text-sm font-semibold mb-1 ${
+                          subject.type === 'Lab' ? 'text-emerald-600 dark:text-emerald-400' : 'text-blue-600 dark:text-blue-400'
+                        }`}>{teacher.role}</p>
                       </div>
 
                       <div className="flex flex-col gap-3.5 text-sm mt-auto">

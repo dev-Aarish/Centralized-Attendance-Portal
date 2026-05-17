@@ -11,6 +11,7 @@ import {
   getSessionSlots,
 } from '../../lib/attendance'
 import SpiralLoader from '../../components/shared/Loader'
+import { useToast } from '../../components/shared/ToastProvider'
 
 // Removed inferSessionTypeFromSection because lecture and lab are now separate subjects
 
@@ -97,6 +98,7 @@ function resolveSessionTimeSlot(session, scheduleSlotMap) {
 }
 
 export default function TeacherAttendance() {
+  const { addToast } = useToast()
   const [sections, setSections] = useState([])
   const [loadingSections, setLoadingSections] = useState(true)
 
@@ -135,6 +137,11 @@ export default function TeacherAttendance() {
       const sectionsRes = await getMyAssignedSections()
       if (sectionsRes.error) {
         setError(sectionsRes.error.message || 'Failed to load assigned sections.')
+        addToast({
+          type: 'error',
+          title: 'Load failed',
+          message: sectionsRes.error.message || 'Failed to load assigned sections.'
+        })
         setSections([])
         setPastSessions([])
         setLoadingSections(false)
@@ -275,7 +282,9 @@ export default function TeacherAttendance() {
 
     const studentsRes = await getStudentsInSection(section.class_section_id)
     if (studentsRes.error) {
-      setError(studentsRes.error.message || 'Failed to load students for section.')
+      const msg = studentsRes.error.message || 'Failed to load students for section.'
+      setError(msg)
+      addToast({ type: 'error', title: 'Load failed', message: msg })
       setStudents([])
       setLoadingStudents(false)
       return
@@ -286,7 +295,9 @@ export default function TeacherAttendance() {
 
     if (nextStudents.length === 0) {
       const hint = studentsRes.meta?.hint
-      setError(hint || 'No students resolved for this section. Check section/student cohort mapping.')
+      const msg = hint || 'No students resolved for this section. Check section/student cohort mapping.'
+      setError(msg)
+      addToast({ type: 'warning', title: 'No students found', message: msg })
     }
 
     setLoadingStudents(false)
@@ -394,8 +405,11 @@ export default function TeacherAttendance() {
       setAttendance({})
       setStudents([])
       setEditSessionId(null)
+      addToast({ type: 'success', title: 'Attendance submitted', message: 'Records saved successfully.' })
     } catch (err) {
-      setError(err?.message || 'Something went wrong while submitting attendance.')
+      const msg = err?.message || 'Something went wrong while submitting attendance.'
+      setError(msg)
+      addToast({ type: 'error', title: 'Submission failed', message: msg })
     } finally {
       setSubmitting(false)
     }
@@ -655,9 +669,6 @@ export default function TeacherAttendance() {
             ) : students.length === 0 ? (
               <div className="bg-white dark:bg-gray-900 border border-gray-100 dark:border-gray-800 rounded-2xl px-5 py-10 text-center">
                 <p className="text-sm text-gray-500">No students enrolled in this section yet.</p>
-                {error && (
-                  <p className="text-xs text-red-500 mt-2">{error}</p>
-                )}
               </div>
             ) : (
               <>
@@ -733,9 +744,6 @@ export default function TeacherAttendance() {
                   })}
                 </div>
 
-                {error && (
-                  <p className="text-sm text-red-500 font-medium px-2">{error}</p>
-                )}
               </>
             )}
           </div>

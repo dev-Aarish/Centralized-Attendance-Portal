@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../hooks/useAuth'
 import { createLeaveApplication, getLeaveRecipients, getMyLeaveApplications, updateLeaveApplicationStatus } from '../../lib/leaves'
+import { useToast } from './ToastProvider'
 
 function formatDateLabel(value) {
   if (!value) return '—'
@@ -97,6 +98,7 @@ function LeaveRequestCard({ item, mode, onAction, busyId }) {
 
 export default function LeaveApplicationsPanel({ open, onClose }) {
   const { role } = useAuth()
+  const { addToast } = useToast()
   const [loading, setLoading] = useState(false)
   const [submitting, setSubmitting] = useState(false)
   const [busyId, setBusyId] = useState(null)
@@ -140,10 +142,20 @@ export default function LeaveApplicationsPanel({ open, onClose }) {
 
         if (requestsRes.error) {
           setError(requestsRes.error.message || 'Failed to load leave applications.')
+          addToast({
+            type: 'error',
+            title: 'Load failed',
+            message: requestsRes.error.message || 'Failed to load leave applications.'
+          })
         }
 
         if (isStudent && recipientsRes.error) {
           setError(recipientsRes.error.message || 'Failed to load leave recipients.')
+          addToast({
+            type: 'error',
+            title: 'Load failed',
+            message: recipientsRes.error.message || 'Failed to load leave recipients.'
+          })
         }
 
         setRequests(requestsRes.data || [])
@@ -156,6 +168,11 @@ export default function LeaveApplicationsPanel({ open, onClose }) {
       } catch (err) {
         if (!active) return
         setError(err?.message || 'Failed to load leave applications.')
+        addToast({
+          type: 'error',
+          title: 'Load failed',
+          message: err?.message || 'Failed to load leave applications.'
+        })
       } finally {
         if (active) setLoading(false)
       }
@@ -180,12 +197,16 @@ export default function LeaveApplicationsPanel({ open, onClose }) {
     event.preventDefault()
 
     if (!hasRecipients) {
-      setError('No recipients available yet. Please contact support or try again later.')
+      const msg = 'No recipients available yet. Please contact support or try again later.'
+      setError(msg)
+      addToast({ type: 'error', title: 'Cannot submit', message: msg })
       return
     }
 
     if (!recipientProfileId || !subject.trim() || !message.trim() || !fromDate) {
-      setError('Recipient, subject, message, and leave date are required.')
+      const msg = 'Recipient, subject, message, and leave date are required.'
+      setError(msg)
+      addToast({ type: 'error', title: 'Missing details', message: msg })
       return
     }
 
@@ -203,6 +224,11 @@ export default function LeaveApplicationsPanel({ open, onClose }) {
 
     if (submitError || !data) {
       setError(submitError?.message || 'Failed to submit leave request.')
+      addToast({
+        type: 'error',
+        title: 'Submission failed',
+        message: submitError?.message || 'Failed to submit leave request.'
+      })
       setSubmitting(false)
       return
     }
@@ -213,6 +239,7 @@ export default function LeaveApplicationsPanel({ open, onClose }) {
     setAttachment(null)
     setFromDate(new Date().toISOString().slice(0, 10))
     setToDate(new Date().toISOString().slice(0, 10))
+    addToast({ type: 'success', title: 'Request submitted', message: 'Leave request sent successfully.' })
     setSubmitting(false)
   }
 
@@ -227,11 +254,21 @@ export default function LeaveApplicationsPanel({ open, onClose }) {
 
     if (updateError || !data) {
       setError(updateError?.message || 'Failed to update leave request.')
+      addToast({
+        type: 'error',
+        title: 'Update failed',
+        message: updateError?.message || 'Failed to update leave request.'
+      })
       setBusyId(null)
       return
     }
 
     setRequests((prev) => prev.map((item) => (item.id === requestId ? data : item)))
+    addToast({
+      type: 'success',
+      title: `Request ${status}`,
+      message: `Leave request has been ${status}.`
+    })
     setBusyId(null)
   }
 

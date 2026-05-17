@@ -786,6 +786,17 @@ router.post('/questions', async (req, res) => {
       })
     }
 
+    const normalizeDifficulty = (value) => {
+      const normalized = String(value || '').trim().toLowerCase()
+      if (normalized === 'locq') return 'locq'
+      if (normalized === 'iocq') return 'iocq'
+      if (normalized === 'hocq') return 'hocq'
+      if (normalized === 'easy') return 'locq'
+      if (normalized === 'medium' || normalized === 'intermediate') return 'iocq'
+      if (normalized === 'hard') return 'hocq'
+      return 'iocq'
+    }
+
     // Create question in bank
     const { data: question, error: qError } = await req.supabase
       .from('question_bank')
@@ -794,7 +805,7 @@ router.post('/questions', async (req, res) => {
         created_by: teacherId,
         question_text: questionText.trim(),
         topic: topic?.trim() || null,
-        difficulty: difficulty || 'medium',
+        difficulty: normalizeDifficulty(difficulty),
       })
       .select()
       .single()

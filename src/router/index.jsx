@@ -6,6 +6,7 @@ import { apiFetch } from '../lib/api'
 import AuthPage from '../pages/AuthPage'
 import OnboardingPage from '../pages/OnboardingPage'
 import LoadingScreen from '../components/shared/LoadingScreen'
+import ResetPassword from '../pages/ResetPassword'
 
 import StudentRoutes from './StudentRoutes'
 import TeacherRoutes from './TeacherRoutes'
@@ -72,6 +73,7 @@ export default function AppRouter() {
       <Routes>
         <Route path="/auth" element={<AuthPage />} />
         <Route path="/auth/callback" element={<AuthPage />} />
+        <Route path="/auth/reset" element={<ResetPassword />} />
         <Route path="/onboarding" element={<OnboardingPage />} />
         <Route path="/*" element={<RoleRouter />} />
       </Routes>

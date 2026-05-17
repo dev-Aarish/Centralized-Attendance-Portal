@@ -1,11 +1,13 @@
 import { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
-import { signInWithGoogle, handleAuthCallback, signInWithEmail, sendOtpForSignup, verifyOtp, updateUserAfterOtp } from '../lib/auth'
+import { signInWithGoogle, handleAuthCallback, signInWithEmail, sendOtpForSignup, verifyOtp, updateUserAfterOtp, sendPasswordResetEmail } from '../lib/auth'
 import { useAuth } from '../hooks/useAuth'
+import { useToast } from '../components/shared/ToastProvider'
 
 export default function AuthPage() {
   const { user, role, loading } = useAuth()
   const navigate = useNavigate()
+  const { addToast } = useToast()
 
   const [tab, setTab] = useState('login') // 'login' | 'signup'
   const [email, setEmail] = useState('')
@@ -23,8 +25,15 @@ export default function AuthPage() {
     if (!isCallback) return
     async function processCallback() {
       const { user, error } = await handleAuthCallback()
-      if (error) { setError(error.message); return }
-      if (user) navigate('/onboarding', { replace: true })
+      if (error) {
+        setError(error.message)
+        addToast({ type: 'error', title: 'Sign-in failed', message: error.message })
+        return
+      }
+      if (user) {
+        addToast({ type: 'success', title: 'Signed in', message: 'Redirecting to onboarding.' })
+        navigate('/onboarding', { replace: true })
+      }
     }
     processCallback()
   }, [navigate])
@@ -77,16 +86,23 @@ export default function AuthPage() {
   async function handlePasswordLogin() {
     setError(null)
     setMessage(null)
-    if (!email.trim() || !password.trim()) return setError('Please fill in all fields.')
+    if (!email.trim() || !password.trim()) {
+      const msg = 'Please fill in all fields.'
+      setError(msg)
+      addToast({ type: 'error', title: 'Missing details', message: msg })
+      return
+    }
     setSubmitting(true)
 
     const { error } = await signInWithEmail(email.trim(), password)
     if (error) {
       setError(error.message)
+      addToast({ type: 'error', title: 'Login failed', message: error.message })
       setSubmitting(false)
       return
     }
 
+    addToast({ type: 'success', title: 'Logged in', message: 'Welcome back.' })
     navigate('/dashboard', { replace: true })
     setSubmitting(false)
   }
@@ -95,42 +111,60 @@ export default function AuthPage() {
     setError(null)
     setMessage(null)
     if (!email.trim() || !fullName.trim() || !password.trim()) {
-      return setError('Please fill in all fields.')
+      const msg = 'Please fill in all fields.'
+      setError(msg)
+      addToast({ type: 'error', title: 'Missing details', message: msg })
+      return
     }
 
     setSubmitting(true)
     const { error } = await sendOtpForSignup(email.trim(), fullName.trim())
     if (error) {
       setError(error.message || 'Failed to send OTP.')
+      addToast({ type: 'error', title: 'OTP failed', message: error.message || 'Failed to send OTP.' })
       setSubmitting(false)
       return
     }
 
     setOtpSent(true)
     setMessage('OTP sent. Check your email for the 6-digit code.')
+    addToast({ type: 'success', title: 'OTP sent', message: 'Check your email for the 6-digit code.' })
     setSubmitting(false)
   }
 
   async function handleVerifyOtp() {
     setError(null)
     setMessage(null)
-    if (!email.trim() || !otp.trim()) return setError('Enter your email and the OTP code.')
-    if (otp.trim().length !== 6) return setError('OTP must be 6 digits.')
+    if (!email.trim() || !otp.trim()) {
+      const msg = 'Enter your email and the OTP code.'
+      setError(msg)
+      addToast({ type: 'error', title: 'Missing OTP', message: msg })
+      return
+    }
+    if (otp.trim().length !== 6) {
+      const msg = 'OTP must be 6 digits.'
+      setError(msg)
+      addToast({ type: 'error', title: 'Invalid OTP', message: msg })
+      return
+    }
 
     setSubmitting(true)
     const { error } = await verifyOtp(email.trim(), otp.trim())
     if (error) {
       setError(error.message)
+      addToast({ type: 'error', title: 'OTP failed', message: error.message })
       setSubmitting(false)
       return
     }
     const { error: updateError } = await updateUserAfterOtp(password, fullName)
     if (updateError) {
       setError(updateError.message || 'Failed to set password.')
+      addToast({ type: 'error', title: 'Signup failed', message: updateError.message || 'Failed to set password.' })
       setSubmitting(false)
       return
     }
 
+    addToast({ type: 'success', title: 'Account created', message: 'Welcome! Redirecting to onboarding.' })
     navigate('/onboarding', { replace: true })
     setSubmitting(false)
   }
@@ -138,7 +172,51 @@ export default function AuthPage() {
   async function handleGoogleSignIn() {
     setError(null)
     const { error } = await signInWithGoogle()
-    if (error) setError(error.message)
+    if (error) {
+      setError(error.message)
+      addToast({ type: 'error', title: 'Google sign-in failed', message: error.message })
+    }
+  }
+
+  async function handleForgotPassword() {
+    setError(null)
+    setMessage(null)
+    if (!email.trim()) {
+      const msg = 'Enter your email to receive a reset link.'
+      setError(msg)
+      addToast({ type: 'error', title: 'Missing email', message: msg })
+      return
+    }
+
+    setSubmitting(true)
+    const { error } = await sendPasswordResetEmail(email.trim())
+    if (error) {
+      setError(error.message || 'Failed to send reset email.')
+      addToast({ type: 'error', title: 'Reset failed', message: error.message || 'Failed to send reset email.' })
+      setSubmitting(false)
+      return
+    }
+
+    setMessage('Password reset link sent. Check your email.')
+    addToast({ type: 'success', title: 'Reset link sent', message: 'Check your email for the password reset link.' })
+    setSubmitting(false)
+  }
+
+  async function handleSubmit(e) {
+    e.preventDefault()
+    if (submitting) return
+
+    if (tab === 'login') {
+      await handlePasswordLogin()
+      return
+    }
+
+    if (otpSent) {
+      await handleVerifyOtp()
+      return
+    }
+
+    await handleSendSignupOtp()
   }
 
   if (loading) return null
@@ -181,7 +259,7 @@ export default function AuthPage() {
         </div>
 
         {/* Form */}
-        <div className="flex flex-col gap-3">
+        <form className="flex flex-col gap-3" onSubmit={handleSubmit}>
           {tab === 'signup' && (
             <input
               type="text"
@@ -210,6 +288,16 @@ export default function AuthPage() {
             className="w-full px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white placeholder-gray-400 focus:outline-none focus:ring-2 focus:ring-blue-500"
           />
 
+          {tab === 'login' && (
+            <button
+              type="button"
+              onClick={handleForgotPassword}
+              className="self-end text-[11px] text-blue-600 hover:text-blue-700 dark:text-blue-400 dark:hover:text-blue-300"
+            >
+              Forgot password?
+            </button>
+          )}
+
           {otpSent && (
             <input
               type="text"
@@ -220,13 +308,10 @@ export default function AuthPage() {
             />
           )}
 
-          {error && <p className="text-xs text-red-500">{error}</p>}
-          {message && <p className="text-xs text-green-500">{message}</p>}
-
           <div className="flex flex-col gap-2">
             {tab === 'login' ? (
               <button
-                onClick={handlePasswordLogin}
+                type="submit"
                 disabled={submitting}
                 className="w-full py-2.5 rounded-xl bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
               >
@@ -235,7 +320,7 @@ export default function AuthPage() {
             ) : (
               <>
                 <button
-                  onClick={handleSendSignupOtp}
+                  type="submit"
                   disabled={submitting}
                   className="w-full py-2.5 rounded-xl bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                 >
@@ -243,7 +328,7 @@ export default function AuthPage() {
                 </button>
                 {otpSent && (
                   <button
-                    onClick={handleVerifyOtp}
+                    type="submit"
                     disabled={submitting}
                     className="w-full py-2.5 rounded-xl bg-gray-900 hover:bg-gray-800 text-white text-sm font-medium transition-colors disabled:opacity-40 disabled:cursor-not-allowed"
                   >
@@ -253,7 +338,7 @@ export default function AuthPage() {
               </>
             )}
           </div>
-        </div>
+        </form>
 
         {/* Divider */}
         <div className="flex items-center gap-3">

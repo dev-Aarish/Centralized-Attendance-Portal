@@ -10,6 +10,7 @@ const AdminAttendance = lazy(() => import('../pages/admin/AdminAttendance'))
 const AdminAlerts = lazy(() => import('../pages/admin/AdminAlerts'))
 const AdminSchedule = lazy(() => import('../pages/admin/AdminSchedule'))
 const AdminAssignCourses = lazy(() => import('../pages/admin/AdminAssignCourses'))
+const AdminLeaves = lazy(() => import('../pages/admin/AdminLeaves'))
 
 export default function AdminRoutes() {
   return (
@@ -21,6 +22,7 @@ export default function AdminRoutes() {
         <Route path="courses" element={<AdminCourses />} />
         <Route path="users" element={<AdminUsers />} />
         <Route path="attendance" element={<AdminAttendance />} />
+        <Route path="leaves" element={<AdminLeaves />} />
         <Route path="alerts" element={<AdminAlerts />} />
         <Route path="schedule" element={<AdminSchedule />} />
         <Route path="assign-courses" element={<AdminAssignCourses />} />

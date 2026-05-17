@@ -3,6 +3,7 @@ import AppLayout from '../../components/shared/AppLayout'
 import { apiFetch } from '../../lib/api'
 import SpiralLoader from '../../components/shared/Loader'
 import { useAuth } from '../../hooks/useAuth'
+import { useToast } from '../../components/shared/ToastProvider'
 
 const YEARS = ['1st', '2nd', '3rd', '4th']
 const SECTIONS = ['A', 'B', 'C']
@@ -34,6 +35,7 @@ const getCourseColor = (courseId) => {
 
 export default function AdminSchedule() {
   const { adminDepartment } = useAuth()
+  const { addToast } = useToast()
   const [selectedYear, setSelectedYear] = useState('')
   const [selectedSection, setSelectedSection] = useState('')
   const [allSections, setAllSections] = useState([])
@@ -63,6 +65,7 @@ export default function AdminSchedule() {
   const [modalOpen, setModalOpen] = useState(false)
   const [modalTitle, setModalTitle] = useState('')
   const [modalBody, setModalBody] = useState(null)
+  const resizeWarningShownRef = useRef(false)
 
   function openModal(title, body) {
     setModalTitle(title || '')
@@ -145,7 +148,11 @@ export default function AdminSchedule() {
       setLoading(true)
       const data = await apiFetch('/api/v1/admin/sections/all')
       setAllSections(data.data || [])
-    } catch (err) { setError(err.message) } finally { setLoading(false) }
+    } catch (err) {
+      const msg = err.message || 'Failed to load sections.'
+      setError(msg)
+      addToast({ type: 'error', title: 'Load failed', message: msg })
+    } finally { setLoading(false) }
   }
 
   async function fetchTeachers() {
@@ -290,7 +297,11 @@ export default function AdminSchedule() {
         setSelectedRoutineId('')
         setGridSchedules([])
       }
-    } catch (err) { setError('Failed to load routines') } finally { setLoading(false) }
+    } catch (err) {
+      const msg = err?.message || 'Failed to load routines.'
+      setError(msg)
+      addToast({ type: 'error', title: 'Load failed', message: msg })
+    } finally { setLoading(false) }
   }
 
   async function fetchSchedules() {
@@ -304,7 +315,12 @@ export default function AdminSchedule() {
       setError(null)
       // If we have a cohort with classSections, use them. 
       // Otherwise, we'll just fetch based on Year/Section (for routines that already have schedules)
-      const sectionIds = cohort?.classSections?.map(cs => cs.id).join(',')
+      const sectionIds = cohort?.classSections?.map(cs => cs.id).filter(Boolean).join(',')
+      if (!selectedRoutineId && !sectionIds) {
+        setGridSchedules([])
+        setError(null)
+        return
+      }
       const url = `/api/v1/admin/schedules?year=${yearNum}&section=${selectedSection}${sectionIds ? `&sectionIds=${sectionIds}` : ''}${selectedRoutineId ? `&routineId=${selectedRoutineId}` : ''}`
       const data = await apiFetch(url, {
         cache: false,
@@ -336,7 +352,9 @@ export default function AdminSchedule() {
       setError(null)
     } catch (err) {
       if (fetchId !== schedulesFetchId.current) return
-      setError('Failed to load existing schedule')
+      const msg = 'Failed to load existing schedule.'
+      setError(msg)
+      addToast({ type: 'error', title: 'Load failed', message: msg })
     } finally {
       if (fetchId === schedulesFetchId.current) setLoading(false)
     }
@@ -358,7 +376,12 @@ export default function AdminSchedule() {
       const data = await apiFetch('/api/v1/admin/routines', { method: 'POST', body: JSON.stringify(payload) })
       await fetchRoutines()
       setSelectedRoutineId(data.data.id)
-    } catch (err) { setError(err.message) } finally { setLoading(false) }
+      addToast({ type: 'success', title: 'Routine created', message: 'New routine saved successfully.' })
+    } catch (err) {
+      const msg = err.message || 'Failed to create routine.'
+      setError(msg)
+      addToast({ type: 'error', title: 'Create failed', message: msg })
+    } finally { setLoading(false) }
   }
 
   async function handleDeleteRoutine() {
@@ -366,7 +389,9 @@ export default function AdminSchedule() {
     const routine = routines.find(r => r.id === selectedRoutineId)
     if (!routine) return
     if (routine.is_active) {
-      setError('Cannot delete the active routine. Please activate another routine first.')
+      const msg = 'Cannot delete the active routine. Please activate another routine first.'
+      setError(msg)
+      addToast({ type: 'error', title: 'Delete blocked', message: msg })
       return
     }
     if (!window.confirm(`Are you sure you want to delete the routine "${routine.name}"? This will permanently delete all its schedule blocks.`)) return
@@ -377,7 +402,12 @@ export default function AdminSchedule() {
       setSuccessMsg('Routine deleted successfully.')
       setTimeout(() => setSuccessMsg(null), 3000)
       await fetchRoutines()
-    } catch (err) { setError(err.message) } finally { setLoading(false) }
+      addToast({ type: 'success', title: 'Routine deleted', message: 'Routine removed successfully.' })
+    } catch (err) {
+      const msg = err.message || 'Failed to delete routine.'
+      setError(msg)
+      addToast({ type: 'error', title: 'Delete failed', message: msg })
+    } finally { setLoading(false) }
   }
 
   async function handleActivateRoutine() {
@@ -388,7 +418,12 @@ export default function AdminSchedule() {
       setSuccessMsg('Routine is now active for students and teachers!')
       setTimeout(() => setSuccessMsg(null), 4000)
       await fetchRoutines()
-    } catch (err) { setError(err.message) } finally { setLoading(false) }
+      addToast({ type: 'success', title: 'Routine activated', message: 'Routine is now active.' })
+    } catch (err) {
+      const msg = err.message || 'Failed to activate routine.'
+      setError(msg)
+      addToast({ type: 'error', title: 'Activation failed', message: msg })
+    } finally { setLoading(false) }
   }
 
   async function handleSave() {
@@ -402,7 +437,9 @@ export default function AdminSchedule() {
         .map((t) => `${t.name}${t.employeeId ? ` (${t.employeeId})` : ''}: ${t.totalHours}h`)
         .join(', ')
       setTeacherWorkloadWarning(`Teacher workload threshold exceeded (max ${TEACHER_WEEKLY_HOURS_LIMIT}h/week): ${details}`)
-      setError(`Cannot save. Teacher workload limit exceeded (max ${TEACHER_WEEKLY_HOURS_LIMIT}h/week): ${details}`)
+      const msg = `Cannot save. Teacher workload limit exceeded (max ${TEACHER_WEEKLY_HOURS_LIMIT}h/week): ${details}`
+      setError(msg)
+      addToast({ type: 'warning', title: 'Save blocked', message: msg })
       return
     }
     try {
@@ -447,7 +484,9 @@ export default function AdminSchedule() {
       })
 
       if (missingRoomEntries.length > 0) {
-        setError(`Cannot save. Assign room numbers for all lectures/labs before saving: ${missingRoomEntries.join(', ')}`)
+        const msg = `Cannot save. Assign room numbers for all lectures/labs before saving: ${missingRoomEntries.join(', ')}`
+        setError(msg)
+        addToast({ type: 'error', title: 'Save blocked', message: msg })
         return
       }
 
@@ -463,11 +502,16 @@ export default function AdminSchedule() {
       await fetchSchedules()
       setSuccessMsg('Schedule saved successfully!')
       setTimeout(() => setSuccessMsg(null), 3000)
+      addToast({ type: 'success', title: 'Schedule saved', message: 'Schedule saved successfully.' })
     } catch (err) {
       if (err?.message?.includes('TEACHER_WORKLOAD_EXCEEDED')) {
-        setError(err.message || 'Cannot save. Teacher workload threshold exceeded.')
+        const msg = err.message || 'Cannot save. Teacher workload threshold exceeded.'
+        setError(msg)
+        addToast({ type: 'error', title: 'Save failed', message: msg })
       } else {
-        setError(err.message)
+        const msg = err.message || 'Failed to save schedule.'
+        setError(msg)
+        addToast({ type: 'error', title: 'Save failed', message: msg })
       }
     } finally { setSaving(false) }
   }
@@ -581,7 +625,11 @@ export default function AdminSchedule() {
       const duration = item.duration || 1
       if (dropHour + duration > 18) return
       if (checkConflict(dropDay, dropHour, duration, source === 'grid' ? item.tempId : null)) {
-        setError('Conflict: Overlapping classes'); setTimeout(() => setError(null), 3000); return
+        const msg = 'Conflict: Overlapping classes.'
+        setError(msg)
+        addToast({ type: 'warning', title: 'Conflict', message: msg })
+        setTimeout(() => setError(null), 3000)
+        return
       }
 
       const proposedTeacherId = (item.teachers && item.teachers.length === 1 && typeof item.teachers[0].id === 'string' && item.teachers[0].id.length > 20) ? item.teachers[0].id : null;
@@ -590,7 +638,9 @@ export default function AdminSchedule() {
         if (proposedTeacherId) {
           const workloadCheck = checkWorkloadExceeded(proposedTeacherId, 1);
           if (workloadCheck) {
-            setActionWarning(`Cannot assign: ${workloadCheck.name}'s workload exceeds ${workloadCheck.limit}h/week limit.`);
+            const msg = `Cannot assign: ${workloadCheck.name}'s workload exceeds ${workloadCheck.limit}h/week limit.`
+            setActionWarning(msg)
+            addToast({ type: 'warning', title: 'Workload limit', message: msg })
             return;
           }
         }
@@ -640,13 +690,21 @@ export default function AdminSchedule() {
       if (schedule && schedule.teacherId) {
         const workloadCheck = checkWorkloadExceeded(schedule.teacherId, newDuration, resizing.tempId);
         if (workloadCheck) {
-          if (!actionWarning) setActionWarning(`Cannot resize: ${workloadCheck.name}'s workload exceeds ${workloadCheck.limit}h/week limit.`);
+          if (!resizeWarningShownRef.current) {
+            const msg = `Cannot resize: ${workloadCheck.name}'s workload exceeds ${workloadCheck.limit}h/week limit.`
+            setActionWarning(msg)
+            addToast({ type: 'warning', title: 'Workload limit', message: msg })
+            resizeWarningShownRef.current = true
+          }
           return;
         }
       }
       setGridSchedules(prev => prev.map(s => s.tempId === resizing.tempId ? { ...s, duration: newDuration } : s))
     }
-    const handleMouseUp = () => setResizing(null)
+    const handleMouseUp = () => {
+      setResizing(null)
+      resizeWarningShownRef.current = false
+    }
     window.addEventListener('mousemove', handleMouseMove)
     window.addEventListener('mouseup', handleMouseUp)
     return () => { window.removeEventListener('mousemove', handleMouseMove); window.removeEventListener('mouseup', handleMouseUp) }
@@ -667,31 +725,6 @@ export default function AdminSchedule() {
         <p className="text-sm text-gray-500 dark:text-gray-400">Schedule management involves complex grid interactions and is not possible to edit on mobile devices. Please use a larger screen.</p>
       </div>
       <div className="hidden md:flex flex-col gap-5 w-full max-w-[1500px] mx-auto relative" style={{ height: 'calc(100vh - 100px)' }}>
-
-        {/* Toast Notifications */}
-        <div className="fixed top-6 right-6 z-[9999] flex flex-col gap-3 pointer-events-none">
-          {(teacherWorkloadWarning || actionWarning) && (
-            <div
-              className="animate-slide-in px-4 py-3 rounded-2xl text-sm font-bold shadow-2xl backdrop-blur-md flex items-center gap-3 pointer-events-auto border"
-              style={{ backgroundColor: '#FFCB08', color: '#000000', borderColor: '#000000' }}
-            >
-              <svg className="w-5 h-5 text-black" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M10.29 3.86L1.82 18a2 2 0 001.71 3h16.94a2 2 0 001.71-3L13.71 3.86a2 2 0 00-3.42 0z" /><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 9v4m0 4h.01" /></svg>
-              {actionWarning || teacherWorkloadWarning}
-            </div>
-          )}
-          {error && (
-            <div className="animate-slide-in px-4 py-3 rounded-2xl bg-red-500/90 dark:bg-red-600/90 text-white text-sm font-bold shadow-2xl backdrop-blur-md flex items-center gap-3 pointer-events-auto border border-white/20">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M12 8v4m0 4h.01M21 12a9 9 0 11-18 0 9 9 0 0118 0z" /></svg>
-              {error}
-            </div>
-          )}
-          {successMsg && (
-            <div className="animate-slide-in px-4 py-3 rounded-2xl bg-green-500/90 dark:bg-green-600/90 text-white text-sm font-bold shadow-2xl backdrop-blur-md flex items-center gap-3 pointer-events-auto border border-white/20">
-              <svg className="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path strokeLinecap="round" strokeLinejoin="round" strokeWidth="2" d="M5 13l4 4L19 7" /></svg>
-              {successMsg}
-            </div>
-          )}
-        </div>
 
         {/* Centered modal popout with bokeh backdrop */}
         {modalOpen && (
@@ -934,7 +967,9 @@ export default function AdminSchedule() {
                                           const tId = e.target.value;
                                           const workloadCheck = checkWorkloadExceeded(tId, schedule.duration, schedule.tempId);
                                           if (workloadCheck) {
-                                            setActionWarning(`Cannot assign: ${workloadCheck.name}'s workload exceeds ${workloadCheck.limit}h/week limit.`);
+                                            const msg = `Cannot assign: ${workloadCheck.name}'s workload exceeds ${workloadCheck.limit}h/week limit.`
+                                            setActionWarning(msg)
+                                            addToast({ type: 'warning', title: 'Workload limit', message: msg })
                                             return;
                                           }
                                           const tObj = schedule.teachers.find(t => t.id === tId);
@@ -955,7 +990,9 @@ export default function AdminSchedule() {
                                           if (tId) {
                                             const workloadCheck = checkWorkloadExceeded(tId, schedule.duration, schedule.tempId);
                                             if (workloadCheck) {
-                                              setActionWarning(`Cannot assign: ${workloadCheck.name}'s workload exceeds ${workloadCheck.limit}h/week limit.`);
+                                              const msg = `Cannot assign: ${workloadCheck.name}'s workload exceeds ${workloadCheck.limit}h/week limit.`
+                                              setActionWarning(msg)
+                                              addToast({ type: 'warning', title: 'Workload limit', message: msg })
                                               return;
                                             }
                                           }

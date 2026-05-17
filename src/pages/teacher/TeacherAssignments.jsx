@@ -10,9 +10,11 @@ import {
   linkQuestionsToAssignment,
 } from '../../lib/assignments'
 import { apiFetch } from '../../lib/api'
+import { useToast } from '../../components/shared/ToastProvider'
 
 export default function TeacherAssignments() {
   const QUESTION_SELECTION_KEY = 'teacher-assignment-question-selection'
+  const { addToast } = useToast()
   const [sections, setSections] = useState([])
   const [selectedSection, setSelectedSection] = useState('')
   const [assignments, setAssignments] = useState([])
@@ -32,7 +34,7 @@ export default function TeacherAssignments() {
   const [selectedTopics, setSelectedTopics] = useState([])
   const [includeUntagged, setIncludeUntagged] = useState(false)
   const [selectedQuestionIds, setSelectedQuestionIds] = useState([])
-  const [difficultyCounts, setDifficultyCounts] = useState({ easy: 0, medium: 0, hard: 0 })
+  const [difficultyCounts, setDifficultyCounts] = useState({ locq: 0, iocq: 0, hocq: 0 })
 
   // Submissions viewing
   const [viewSubmissionsId, setViewSubmissionsId] = useState(null)
@@ -44,7 +46,7 @@ export default function TeacherAssignments() {
   const [showQForm, setShowQForm] = useState(false)
   const [qText, setQText] = useState('')
   const [qTopic, setQTopic] = useState('')
-  const [qDifficulty, setQDifficulty] = useState('medium')
+  const [qDifficulty, setQDifficulty] = useState('iocq')
   const navigate = useNavigate()
 
   useEffect(() => {
@@ -77,6 +79,11 @@ export default function TeacherAssignments() {
     const { data, error: fetchError } = await getAssignmentsForSection(selectedSection)
     if (fetchError) {
       setError(fetchError.message || 'Failed to load assignments.')
+      addToast({
+        type: 'error',
+        title: 'Load failed',
+        message: fetchError.message || 'Failed to load assignments.'
+      })
       return
     }
     setAssignments(data || [])
@@ -86,6 +93,11 @@ export default function TeacherAssignments() {
     const { data, error: fetchError } = await getQuestionBank(selectedSection)
     if (fetchError) {
       setError(fetchError.message || 'Failed to load question bank.')
+      addToast({
+        type: 'error',
+        title: 'Load failed',
+        message: fetchError.message || 'Failed to load question bank.'
+      })
       return
     }
     setQuestions(data || [])
@@ -107,12 +119,30 @@ export default function TeacherAssignments() {
     setSelectedTopics((prev) => (prev.includes(topic) ? prev.filter((t) => t !== topic) : [...prev, topic]))
   }
 
+  function normalizeDifficultyValue(value) {
+    const normalized = String(value || '').trim().toLowerCase()
+    if (normalized === 'locq') return 'locq'
+    if (normalized === 'iocq') return 'iocq'
+    if (normalized === 'hocq') return 'hocq'
+    if (normalized === 'easy') return 'locq'
+    if (normalized === 'medium' || normalized === 'intermediate') return 'iocq'
+    if (normalized === 'hard') return 'hocq'
+    return 'iocq'
+  }
+
+  function getDifficultyLabel(value) {
+    const normalized = normalizeDifficultyValue(value)
+    if (normalized === 'locq') return 'LOCQ'
+    if (normalized === 'hocq') return 'HOCQ'
+    return 'IOCQ'
+  }
+
   function hydrateSelection(sectionId) {
     let next = {
       selectedTopics: [],
       includeUntagged: false,
       selectedQuestionIds: [],
-      difficultyCounts: { easy: 0, medium: 0, hard: 0 },
+      difficultyCounts: { locq: 0, iocq: 0, hocq: 0 },
     }
     try {
       const raw = sessionStorage.getItem(QUESTION_SELECTION_KEY)
@@ -123,12 +153,20 @@ export default function TeacherAssignments() {
             selectedTopics: parsed.selectedTopics || [],
             includeUntagged: Boolean(parsed.includeUntagged),
             selectedQuestionIds: parsed.selectedQuestionIds || [],
-            difficultyCounts: parsed.difficultyCounts || { easy: 0, medium: 0, hard: 0 },
+            difficultyCounts: parsed.difficultyCounts || { locq: 0, iocq: 0, hocq: 0 },
           }
         }
       }
     } catch {
       // ignore storage errors
+    }
+
+    if (!('locq' in next.difficultyCounts) && !('iocq' in next.difficultyCounts) && !('hocq' in next.difficultyCounts)) {
+      next.difficultyCounts = {
+        locq: clampToInt(next.difficultyCounts.easy),
+        iocq: clampToInt(next.difficultyCounts.medium),
+        hocq: clampToInt(next.difficultyCounts.hard),
+      }
     }
 
     setSelectedTopics(next.selectedTopics)
@@ -164,14 +202,14 @@ export default function TeacherAssignments() {
 
   function normalizeDifficultyCounts(total) {
     const counts = {
-      easy: clampToInt(difficultyCounts.easy),
-      medium: clampToInt(difficultyCounts.medium),
-      hard: clampToInt(difficultyCounts.hard),
+      locq: clampToInt(difficultyCounts.locq),
+      iocq: clampToInt(difficultyCounts.iocq),
+      hocq: clampToInt(difficultyCounts.hocq),
     }
-    let sum = counts.easy + counts.medium + counts.hard
+    let sum = counts.locq + counts.iocq + counts.hocq
     if (sum <= total) return { counts, remaining: total - sum }
 
-    const order = ['hard', 'medium', 'easy']
+    const order = ['hocq', 'iocq', 'locq']
     let idx = 0
     while (sum > total) {
       const key = order[idx % order.length]
@@ -197,9 +235,9 @@ export default function TeacherAssignments() {
 
   function pickRandomQuestions(pool, total) {
     const byDifficulty = {
-      easy: pool.filter((q) => (q.difficulty || '').toLowerCase() === 'easy'),
-      medium: pool.filter((q) => !q.difficulty || (q.difficulty || '').toLowerCase() === 'medium'),
-      hard: pool.filter((q) => (q.difficulty || '').toLowerCase() === 'hard'),
+      locq: pool.filter((q) => normalizeDifficultyValue(q.difficulty) === 'locq'),
+      iocq: pool.filter((q) => normalizeDifficultyValue(q.difficulty) === 'iocq'),
+      hocq: pool.filter((q) => normalizeDifficultyValue(q.difficulty) === 'hocq'),
     }
 
     const { counts, remaining } = normalizeDifficultyCounts(total)
@@ -222,9 +260,19 @@ export default function TeacherAssignments() {
   }
 
   async function handleCreateAssignment() {
-    if (!formTitle.trim()) return setError('Title is required.')
+    if (!formTitle.trim()) {
+      const msg = 'Title is required.'
+      setError(msg)
+      addToast({ type: 'error', title: 'Missing title', message: msg })
+      return
+    }
     const pool = buildQuestionPool()
-    if (pool.length < formCount) return setError(`Not enough questions for the selected filters. Need ${formCount}, found ${pool.length}.`)
+    if (pool.length < formCount) {
+      const msg = `Not enough questions for the selected filters. Need ${formCount}, found ${pool.length}.`
+      setError(msg)
+      addToast({ type: 'error', title: 'Not enough questions', message: msg })
+      return
+    }
     setError(null)
     setSubmitting(true)
 
@@ -239,6 +287,11 @@ export default function TeacherAssignments() {
 
     if (assignmentError || !assignment?.id) {
       setError(assignmentError?.message || 'Failed to create assignment.')
+      addToast({
+        type: 'error',
+        title: 'Create failed',
+        message: assignmentError?.message || 'Failed to create assignment.'
+      })
       setSubmitting(false)
       return
     }
@@ -251,6 +304,11 @@ export default function TeacherAssignments() {
       const { error: linkError } = await linkQuestionsToAssignment(assignment.id, shuffledQuestionIds)
       if (linkError) {
         setError(linkError.message || 'Assignment created, but linking questions failed.')
+        addToast({
+          type: 'warning',
+          title: 'Questions not linked',
+          message: linkError.message || 'Assignment created, but linking questions failed.'
+        })
       }
     }
 
@@ -258,6 +316,7 @@ export default function TeacherAssignments() {
     setShowForm(false)
     setSubmitting(false)
     await loadAssignments()
+    addToast({ type: 'success', title: 'Assignment created', message: 'Assignment published successfully.' })
   }
 
   async function loadSubmissions(assignmentId) {
@@ -273,7 +332,9 @@ export default function TeacherAssignments() {
         setSubmissionsData(prev => ({ ...prev, [assignmentId]: data.data || [] }))
       } catch (err) {
         console.error(err)
-        setError(err.message)
+        const msg = err.message || 'Failed to load submissions.'
+        setError(msg)
+        addToast({ type: 'error', title: 'Load failed', message: msg })
       } finally {
         setLoadingSubmissions(prev => ({ ...prev, [assignmentId]: false }))
       }
@@ -292,12 +353,14 @@ export default function TeacherAssignments() {
 
     if (addError) {
       setError(addError.message || 'Failed to add question.')
+      addToast({ type: 'error', title: 'Add failed', message: addError.message || 'Failed to add question.' })
       return
     }
 
-    setQText(''); setQTopic(''); setQDifficulty('medium')
+    setQText(''); setQTopic(''); setQDifficulty('iocq')
     setShowQForm(false)
     await loadQuestions()
+    addToast({ type: 'success', title: 'Question added', message: 'Question saved to the bank.' })
   }
 
   return (
@@ -436,32 +499,32 @@ export default function TeacherAssignments() {
                         <p className="text-xs font-semibold text-gray-600 dark:text-gray-300 mb-2">Difficulty split</p>
                         <div className="flex flex-col gap-2">
                           <label className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-300">
-                            Easy
+                            LOCQ
                             <input
                               type="number"
                               min={0}
-                              value={difficultyCounts.easy}
-                              onChange={(e) => setDifficultyCounts((prev) => ({ ...prev, easy: clampToInt(e.target.value) }))}
+                              value={difficultyCounts.locq}
+                              onChange={(e) => setDifficultyCounts((prev) => ({ ...prev, locq: clampToInt(e.target.value) }))}
                               className="w-16 px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-xs text-gray-900 dark:text-white"
                             />
                           </label>
                           <label className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-300">
-                            Medium
+                            IOCQ
                             <input
                               type="number"
                               min={0}
-                              value={difficultyCounts.medium}
-                              onChange={(e) => setDifficultyCounts((prev) => ({ ...prev, medium: clampToInt(e.target.value) }))}
+                              value={difficultyCounts.iocq}
+                              onChange={(e) => setDifficultyCounts((prev) => ({ ...prev, iocq: clampToInt(e.target.value) }))}
                               className="w-16 px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-xs text-gray-900 dark:text-white"
                             />
                           </label>
                           <label className="flex items-center justify-between text-xs text-gray-600 dark:text-gray-300">
-                            Hard
+                            HOCQ
                             <input
                               type="number"
                               min={0}
-                              value={difficultyCounts.hard}
-                              onChange={(e) => setDifficultyCounts((prev) => ({ ...prev, hard: clampToInt(e.target.value) }))}
+                              value={difficultyCounts.hocq}
+                              onChange={(e) => setDifficultyCounts((prev) => ({ ...prev, hocq: clampToInt(e.target.value) }))}
                               className="w-16 px-2 py-1 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-xs text-gray-900 dark:text-white"
                             />
                           </label>
@@ -486,7 +549,6 @@ export default function TeacherAssignments() {
                         Manage questions
                       </button>
                     </div>
-                    {error && <p className="text-xs text-red-500">{error}</p>}
                     <button
                       onClick={handleCreateAssignment}
                       disabled={submitting}
@@ -714,9 +776,9 @@ export default function TeacherAssignments() {
                         onChange={(e) => setQDifficulty(e.target.value)}
                         className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
                       >
-                        <option value="easy">Easy</option>
-                        <option value="medium">Medium</option>
-                        <option value="hard">Hard</option>
+                        <option value="locq">LOCQ</option>
+                        <option value="iocq">IOCQ</option>
+                        <option value="hocq">HOCQ</option>
                       </select>
                     </div>
                     <button
@@ -746,13 +808,13 @@ export default function TeacherAssignments() {
                               </span>
                             )}
                             <span className={`text-xs px-2 py-0.5 rounded-full ${
-                              q.difficulty === 'easy'
+                              normalizeDifficultyValue(q.difficulty) === 'locq'
                                 ? 'bg-green-50 dark:bg-green-950 text-green-600 dark:text-green-400'
-                                : q.difficulty === 'hard'
+                                : normalizeDifficultyValue(q.difficulty) === 'hocq'
                                 ? 'bg-red-50 dark:bg-red-950 text-red-500 dark:text-red-400'
                                 : 'bg-amber-50 dark:bg-amber-950 text-amber-600 dark:text-amber-400'
                             }`}>
-                              {q.difficulty}
+                              {getDifficultyLabel(q.difficulty)}
                             </span>
                           </div>
                         </div>

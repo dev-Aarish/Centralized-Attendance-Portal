@@ -13,6 +13,14 @@ function isAllowedEmail(email) {
   return ALLOWED_DOMAINS.some((domain) => normalized.endsWith(domain))
 }
 
+async function rejectUnauthorizedUser() {
+  try {
+    await apiFetch('/api/v1/auth/reject', { method: 'POST', cache: false })
+  } catch (err) {
+    console.warn('Failed to reject unauthorized user:', err)
+  }
+}
+
 // Sign in with Google OAuth — stays client-side
 export async function signInWithGoogle() {
   const { data, error } = await supabase.auth.signInWithOAuth({
@@ -36,6 +44,7 @@ export async function handleAuthCallback() {
   const email = session.user.email
 
   if (!isAllowedEmail(email)) {
+    await rejectUnauthorizedUser()
     await supabase.auth.signOut()
     return {
       user: null,
@@ -160,5 +169,27 @@ export async function updateUserAfterOtp(password, fullName = null) {
   }
 
   const { data, error } = await supabase.auth.updateUser(updatePayload)
+  return { data, error }
+}
+
+export async function sendPasswordResetEmail(email) {
+  if (!isAllowedEmail(email)) {
+    return { data: null, error: new Error('Only heritageit.edu.in / heritageit.edu accounts are allowed.') }
+  }
+
+  const { data, error } = await supabase.auth.resetPasswordForEmail(email, {
+    redirectTo: `${window.location.origin}/auth/reset`,
+  })
+
+  return { data, error }
+}
+
+export async function updatePassword(newPassword) {
+  const password = String(newPassword || '').trim()
+  if (!password) {
+    return { data: null, error: new Error('Password is required.') }
+  }
+
+  const { data, error } = await supabase.auth.updateUser({ password })
   return { data, error }
 }

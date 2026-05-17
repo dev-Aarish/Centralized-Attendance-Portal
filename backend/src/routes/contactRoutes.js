@@ -211,14 +211,21 @@ router.get('/student', async (req, res) => {
         if (!section) return null
 
         const sectionTeacherIds = Array.from(teachersBySection.get(section.id) || [])
+        const courseType = (section.courses?.name || '').toLowerCase().includes('lab') ? 'Lab' : 'Lecture'
+        const teacherRole = courseType === 'Lab' ? 'Instructor' : 'Lecturer'
+
         const teachers = sectionTeacherIds
-          .map((teacherId) => teacherMap[teacherId] || {
-            id: teacherId,
-            name: teacherId ? 'Assigned Teacher' : 'Unassigned',
-            email: null,
-            employeeId: null,
-            department: null,
-            role: 'Lecturer',
+          .map((teacherId) => {
+            const t = teacherMap[teacherId]
+            if (!t) return {
+              id: teacherId,
+              name: teacherId ? 'Assigned Teacher' : 'Unassigned',
+              email: null,
+              employeeId: null,
+              department: null,
+              role: teacherRole,
+            }
+            return { ...t, role: teacherRole }
           })
           .filter(Boolean)
 
@@ -229,7 +236,7 @@ router.get('/student', async (req, res) => {
             email: null,
             employeeId: null,
             department: null,
-            role: 'Lecturer',
+            role: teacherRole,
           })
         }
 
@@ -238,7 +245,7 @@ router.get('/student', async (req, res) => {
           subjectName: section.courses?.name || 'Unnamed Subject',
           subjectCode: section.courses?.code || 'N/A',
           section: section.section,
-          type: 'Lecture',
+          type: courseType,
           teachers,
         }
       })

@@ -2,9 +2,11 @@ import { useEffect, useMemo, useState } from 'react'
 import { useNavigate, useSearchParams } from 'react-router-dom'
 import AppLayout from '../../components/shared/AppLayout'
 import { getQuestionBank } from '../../lib/assignments'
+import { useToast } from '../../components/shared/ToastProvider'
 
 export default function TeacherQuestionSelector() {
   const QUESTION_SELECTION_KEY = 'teacher-assignment-question-selection'
+  const { addToast } = useToast()
   const [searchParams] = useSearchParams()
   const navigate = useNavigate()
   const sectionId = searchParams.get('sectionId') || ''
@@ -73,6 +75,24 @@ export default function TeacherQuestionSelector() {
     })
   }, [questions, search])
 
+  function normalizeDifficultyValue(value) {
+    const normalized = String(value || '').trim().toLowerCase()
+    if (normalized === 'locq') return 'locq'
+    if (normalized === 'iocq') return 'iocq'
+    if (normalized === 'hocq') return 'hocq'
+    if (normalized === 'easy') return 'locq'
+    if (normalized === 'medium' || normalized === 'intermediate') return 'iocq'
+    if (normalized === 'hard') return 'hocq'
+    return 'iocq'
+  }
+
+  function getDifficultyLabel(value) {
+    const normalized = normalizeDifficultyValue(value)
+    if (normalized === 'locq') return 'LOCQ'
+    if (normalized === 'hocq') return 'HOCQ'
+    return 'IOCQ'
+  }
+
   function toggleQuestion(questionId) {
     setSelectedIds((prev) => (
       prev.includes(questionId) ? prev.filter((id) => id !== questionId) : [...prev, questionId]
@@ -98,7 +118,9 @@ export default function TeacherQuestionSelector() {
         selectedTopics: filters.selectedTopics,
         includeUntagged: filters.includeUntagged,
       }))
+      addToast({ type: 'success', title: 'Selection saved', message: 'Question selection updated.' })
     } catch {
+      addToast({ type: 'error', title: 'Save failed', message: 'Unable to save the selection. Try again.' })
       // ignore storage errors
     }
     navigate('/assignments')
@@ -195,13 +217,13 @@ export default function TeacherQuestionSelector() {
                           </span>
                         )}
                         <span className={`text-[11px] px-2 py-0.5 rounded-full ${
-                          q.difficulty === 'easy'
+                          normalizeDifficultyValue(q.difficulty) === 'locq'
                             ? 'bg-green-50 dark:bg-green-950 text-green-600 dark:text-green-400'
-                            : q.difficulty === 'hard'
+                            : normalizeDifficultyValue(q.difficulty) === 'hocq'
                             ? 'bg-red-50 dark:bg-red-950 text-red-500 dark:text-red-400'
                             : 'bg-amber-50 dark:bg-amber-950 text-amber-600 dark:text-amber-400'
                         }`}>
-                          {q.difficulty || 'medium'}
+                          {getDifficultyLabel(q.difficulty)}
                         </span>
                       </div>
                     </div>

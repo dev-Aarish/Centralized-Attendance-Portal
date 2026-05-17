@@ -79,7 +79,7 @@ async function buildRecipientLists(db, studentProfile) {
   ])
 
   let teacherRecipients = (teachersRes.data || []).map((teacher) => ({
-    id: teacher.profile_id || teacher.profiles?.id,
+    id: teacher.profile_id || teacher.profiles?.id || teacher.id,
     role: 'teacher',
     name: teacher.profiles?.full_name || 'Unknown Professor',
     department: teacher.department || teacher.profiles?.department || null,
@@ -124,27 +124,32 @@ async function buildRecipientLists(db, studentProfile) {
     adminRecipients = filteredAdmins
   }
 
-  if (teacherRecipients.length === 0 && adminRecipients.length === 0) {
+  if (teacherRecipients.length === 0 || adminRecipients.length === 0) {
     const fallbackProfiles = fallbackProfilesRes.data || []
-    teacherRecipients = fallbackProfiles
-      .filter((profile) => profile.role === 'teacher')
-      .map((profile) => ({
-        id: profile.id,
-        role: 'teacher',
-        name: profile.full_name || 'Unknown Professor',
-        department: null,
-        label: profile.full_name || 'Unknown Professor',
-      }))
+    
+    if (teacherRecipients.length === 0) {
+      teacherRecipients = fallbackProfiles
+        .filter((profile) => profile.role === 'teacher')
+        .map((profile) => ({
+          id: profile.id,
+          role: 'teacher',
+          name: profile.full_name || 'Unknown Professor',
+          department: null,
+          label: profile.full_name || 'Unknown Professor',
+        }))
+    }
 
-    adminRecipients = fallbackProfiles
-      .filter((profile) => profile.role === 'admin')
-      .map((profile) => ({
-        id: profile.id,
-        role: 'admin',
-        name: profile.full_name || 'HOD / Admin',
-        department: null,
-        label: profile.full_name || 'HOD / Admin',
-      }))
+    if (adminRecipients.length === 0) {
+      adminRecipients = fallbackProfiles
+        .filter((profile) => profile.role === 'admin')
+        .map((profile) => ({
+          id: profile.id,
+          role: 'admin',
+          name: profile.full_name || 'HOD / Admin',
+          department: null,
+          label: profile.full_name || 'HOD / Admin',
+        }))
+    }
   }
 
   return {
@@ -164,34 +169,50 @@ async function buildRecipientLists(db, studentProfile) {
 }
 
 async function enrichLeaveRows(db, rows = []) {
-  const studentProfileIds = [...new Set(rows.map((row) => row.student_profile_id).filter(Boolean))]
-  const recipientProfileIds = [...new Set(rows.map((row) => row.recipient_profile_id).filter(Boolean))]
-  const reviewerProfileIds = [...new Set(rows.map((row) => row.reviewed_by).filter(Boolean))]
+  const studentProfileIds = [...new Set(rows.map((r) => r.student_profile_id).filter(Boolean))]
+  const recipientIds = [...new Set(rows.map((r) => r.recipient_profile_id).filter(Boolean))]
+  const reviewerIds = [...new Set(rows.map((r) => r.reviewed_by).filter(Boolean))]
 
-  const [studentsRes, recipientsRes, reviewersRes] = await Promise.all([
+  const [studentsRes, profilesRes, teachersRes, reviewersRes] = await Promise.all([
     studentProfileIds.length
-      ? db
-          .from('student_profiles')
-          .select('id, roll_number, profiles ( id, full_name, role )')
-          .in('id', studentProfileIds)
+      ? db.from('student_profiles').select('id, roll_number, profiles(id, full_name, role, email)').in('id', studentProfileIds)
       : Promise.resolve({ data: [] }),
-    recipientProfileIds.length
-      ? db
-          .from('profiles')
-          .select('id, full_name, role, department')
-          .in('id', recipientProfileIds)
+    recipientIds.length
+      ? db.from('profiles').select('id, full_name, role').in('id', recipientIds)
       : Promise.resolve({ data: [] }),
-    reviewerProfileIds.length
-      ? db
-          .from('profiles')
-          .select('id, full_name, role, department')
-          .in('id', reviewerProfileIds)
+    recipientIds.length
+      ? db.from('teacher_profiles').select('id, profile_id, profiles(id, full_name, role)').in('id', recipientIds)
+      : Promise.resolve({ data: [] }),
+    reviewerIds.length
+      ? db.from('profiles').select('id, full_name, role').in('id', reviewerIds)
       : Promise.resolve({ data: [] }),
   ])
 
-  const studentMap = Object.fromEntries((studentsRes.data || []).map((student) => [student.id, student]))
-  const recipientMap = Object.fromEntries((recipientsRes.data || []).map((profile) => [profile.id, profile]))
-  const reviewerMap = Object.fromEntries((reviewersRes.data || []).map((profile) => [profile.id, profile]))
+  const studentMap = {}
+  ;(studentsRes.data || []).forEach(s => { studentMap[s.id] = s })
+
+  // Build a master map of profiles by ID
+  const masterProfileMap = {}
+  ;(profilesRes.data || []).forEach(p => { masterProfileMap[p.id] = p })
+  ;(reviewersRes.data || []).forEach(p => { masterProfileMap[p.id] = p })
+  
+  // If some recipients are teacher_profiles IDs, resolve their profile info
+  const teacherIdToProfileMap = {}
+  ;(teachersRes.data || []).forEach(t => {
+    if (t.profiles) {
+      teacherIdToProfileMap[t.id] = t.profiles
+    }
+  })
+
+  const getRecipientInfo = (id) => {
+    // 1. Check if it's a direct profile ID
+    if (masterProfileMap[id]) return masterProfileMap[id]
+    // 2. Check if it's a teacher profile ID
+    if (teacherIdToProfileMap[id]) return teacherIdToProfileMap[id]
+    return null
+  }
+
+  const reviewerMap = masterProfileMap
 
   return rows.map((row) => ({
     id: row.id,
@@ -211,13 +232,13 @@ async function enrichLeaveRows(db, rows = []) {
       profileId: studentMap[row.student_profile_id]?.profile_id || null,
       name: studentMap[row.student_profile_id]?.profiles?.full_name || 'Unknown Student',
       rollNumber: studentMap[row.student_profile_id]?.roll_number || null,
+      email: studentMap[row.student_profile_id]?.profiles?.email || null,
       role: 'student',
     },
     recipient: {
       id: row.recipient_profile_id,
-      name: recipientMap[row.recipient_profile_id]?.full_name || 'Unknown Recipient',
-      role: recipientMap[row.recipient_profile_id]?.role || null,
-      department: recipientMap[row.recipient_profile_id]?.department || null,
+      name: getRecipientInfo(row.recipient_profile_id)?.full_name || 'Unknown Recipient',
+      role: getRecipientInfo(row.recipient_profile_id)?.role || null,
     },
     reviewedBy: row.reviewed_by ? {
       id: row.reviewed_by,
@@ -339,6 +360,20 @@ router.post('/applications', upload.single('attachment'), async (req, res) => {
     if (!subject) return res.status(400).json({ error: 'subject is required' })
     if (!message) return res.status(400).json({ error: 'message is required' })
     if (!fromDate || !toDate) return res.status(400).json({ error: 'fromDate and toDate are required' })
+    
+    // Check if fromDate is at least tomorrow
+    const today = new Date()
+    today.setHours(0, 0, 0, 0)
+    const tomorrow = new Date(today)
+    tomorrow.setDate(today.getDate() + 1)
+    
+    const selectedFromDate = new Date(fromDate)
+    selectedFromDate.setHours(0, 0, 0, 0)
+    
+    if (selectedFromDate.getTime() < tomorrow.getTime()) {
+      return res.status(400).json({ error: 'Leave must start at least from tomorrow. Same-day or previous-day leave is not allowed.' })
+    }
+
     if (new Date(fromDate).getTime() > new Date(toDate).getTime()) {
       return res.status(400).json({ error: 'fromDate cannot be after toDate' })
     }

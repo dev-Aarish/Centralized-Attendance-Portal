@@ -2,8 +2,8 @@ import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../hooks/useAuth'
 import { signOut } from '../../lib/auth'
 import { createAnnouncement, getAnnouncements } from '../../lib/announcements'
-import LeaveApplicationsPanel from './LeaveApplicationsPanel'
 import { getMyProfile, getMyStudentProfile, getMyTeacherProfile, uploadMyAvatar } from '../../lib/profile'
+import { useToast } from './ToastProvider'
 
 function formatLocalDateKey(date = new Date()) {
   const year = date.getFullYear()
@@ -53,6 +53,7 @@ function highlightText(text, query) {
 
 export default function TopHeader({ title }) {
   const { user, role, adminDepartment } = useAuth()
+  const { addToast } = useToast()
   const [isOpen, setIsOpen] = useState(false)
   const [announcements, setAnnouncements] = useState([])
   const [loading, setLoading] = useState(false)
@@ -75,7 +76,6 @@ export default function TopHeader({ title }) {
   const [profileLoading, setProfileLoading] = useState(false)
   const [profileError, setProfileError] = useState(null)
   const [avatarUploading, setAvatarUploading] = useState(false)
-  const [isLeaveOpen, setIsLeaveOpen] = useState(false)
   const [isProfileOpen, setIsProfileOpen] = useState(false)
 
   const sortedAnnouncements = useMemo(() => {
@@ -133,6 +133,11 @@ export default function TopHeader({ title }) {
       const { data, error: fetchError } = await getAnnouncements()
       if (fetchError) {
         setError(fetchError.message || 'Failed to load announcements.')
+        addToast({
+          type: 'error',
+          title: 'Load failed',
+          message: fetchError.message || 'Failed to load announcements.'
+        })
       }
       setAnnouncements(data || [])
       setLoading(false)
@@ -170,7 +175,9 @@ export default function TopHeader({ title }) {
           localStorage.removeItem(`cachedRoleProfile:${user.id}`)
         }
       } catch (err) {
-        setProfileError(err?.message || 'Failed to load profile.')
+        const msg = err?.message || 'Failed to load profile.'
+        setProfileError(msg)
+        addToast({ type: 'error', title: 'Profile failed', message: msg })
       } finally {
         setProfileLoading(false)
       }
@@ -212,7 +219,9 @@ export default function TopHeader({ title }) {
 
     const { data, error: uploadError } = await uploadMyAvatar(file)
     if (uploadError || !data) {
-      setProfileError(uploadError?.message || 'Failed to upload avatar.')
+      const msg = uploadError?.message || 'Failed to upload avatar.'
+      setProfileError(msg)
+      addToast({ type: 'error', title: 'Upload failed', message: msg })
       setAvatarUploading(false)
       return
     }
@@ -234,6 +243,7 @@ export default function TopHeader({ title }) {
       localStorage.setItem(`cachedRoleProfile:${user.id}`, JSON.stringify(updated))
       return updated
     })
+    addToast({ type: 'success', title: 'Avatar updated', message: 'Your profile photo has been updated.' })
     setAvatarUploading(false)
   }
 
@@ -266,12 +276,16 @@ export default function TopHeader({ title }) {
 
   async function handleCreateAnnouncement() {
     if (!newTitle.trim() || !newMessage.trim()) {
-      setError('Title and message are required.')
+      const msg = 'Title and message are required.'
+      setError(msg)
+      addToast({ type: 'error', title: 'Missing details', message: msg })
       return
     }
 
     if (newPinnedUntil && !/^\d{4}-\d{2}-\d{2}$/.test(newPinnedUntil)) {
-      setError('Pinned until must be a valid date.')
+      const msg = 'Pinned until must be a valid date.'
+      setError(msg)
+      addToast({ type: 'error', title: 'Invalid date', message: msg })
       return
     }
 
@@ -285,7 +299,9 @@ export default function TopHeader({ title }) {
     })
 
     if (createError || !data) {
-      setError(createError?.message || 'Failed to publish announcement.')
+      const msg = createError?.message || 'Failed to publish announcement.'
+      setError(msg)
+      addToast({ type: 'error', title: 'Publish failed', message: msg })
       setPosting(false)
       return
     }
@@ -295,6 +311,7 @@ export default function TopHeader({ title }) {
     setNewMessage('')
     setNewPinnedUntil('')
     setPosting(false)
+    addToast({ type: 'success', title: 'Announcement posted', message: 'Announcement published successfully.' })
   }
 
   function toggleAnnouncements() {
@@ -314,21 +331,6 @@ export default function TopHeader({ title }) {
         {title}
       </h1>
       <div className="flex items-center gap-3 relative">
-        <button
-          type="button"
-          onClick={() => {
-            setIsLeaveOpen((current) => !current)
-            setIsOpen(false)
-            setIsProfileOpen(false)
-          }}
-          className="relative h-9 w-9 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-gray-600 dark:text-gray-300 hover:bg-gray-50 dark:hover:bg-gray-700 transition-colors flex items-center justify-center"
-          title="Leave applications"
-        >
-          <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" className="h-5 w-5">
-            <path d="M4 6.5A2.5 2.5 0 0 1 6.5 4h11A2.5 2.5 0 0 1 20 6.5v11A2.5 2.5 0 0 1 17.5 20h-11A2.5 2.5 0 0 1 4 17.5z" strokeLinecap="round" strokeLinejoin="round" />
-            <path d="M7 8h10M7 12h10M7 16h6" strokeLinecap="round" strokeLinejoin="round" />
-          </svg>
-        </button>
         <button
           type="button"
           onClick={toggleAnnouncements}
@@ -351,7 +353,6 @@ export default function TopHeader({ title }) {
             onClick={() => {
               setIsProfileOpen((current) => !current)
               setIsOpen(false)
-              setIsLeaveOpen(false)
             }}
             className="relative w-9 h-9 rounded-full border border-blue-100 dark:border-blue-900 bg-blue-50 dark:bg-blue-950 text-blue-600 dark:text-blue-400 text-xs font-semibold flex items-center justify-center overflow-hidden"
             title="Profile"
@@ -555,10 +556,6 @@ export default function TopHeader({ title }) {
           </>
         )}
 
-        <LeaveApplicationsPanel
-          open={isLeaveOpen}
-          onClose={() => setIsLeaveOpen(false)}
-        />
       </div>
     </header>
   )

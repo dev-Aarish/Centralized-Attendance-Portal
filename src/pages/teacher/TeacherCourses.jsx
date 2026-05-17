@@ -27,10 +27,29 @@ export default function TeacherCourses() {
   }, [])
 
   useEffect(() => {
-    if (loading || !selectedSectionId || selected) return
-    const match = sections.find((s) => (s.class_section_id || s.id) === selectedSectionId)
-    if (match) {
-      handleSelect(match)
+    if (loading) return
+
+    // If no sectionId in URL, reset selection
+    if (!selectedSectionId) {
+      if (selected) {
+        setSelected(null)
+        setStudents([])
+        setSessions([])
+      }
+      return
+    }
+
+    // If sectionId in URL but not selected yet, or changed
+    const currentId = selected?.class_section_id || selected?.id
+    if (!selected || currentId !== selectedSectionId) {
+      const match = sections.find((s) => (s.class_section_id || s.id) === selectedSectionId)
+      if (match) {
+        handleSelect(match)
+      } else {
+        // ID in URL but no match in sections (maybe old/invalid)
+        setSelected(null)
+        setSearchParams({}, { replace: true })
+      }
     }
   }, [loading, selectedSectionId, sections, selected])
 
@@ -347,7 +366,7 @@ export default function TeacherCourses() {
             <div className="flex items-center justify-between">
               <div>
                 <button
-                  onClick={() => { setSelected(null); setStudents([]); setSessions([]); setSearchParams({}, { replace: true }) }}
+                  onClick={() => setSearchParams({}, { replace: true })}
                   className="text-xs text-gray-400 hover:text-gray-600 dark:hover:text-gray-200 mb-2 transition-colors"
                 >
                   ← Back to courses
