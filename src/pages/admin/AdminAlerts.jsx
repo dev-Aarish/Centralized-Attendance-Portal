@@ -3,12 +3,14 @@ import AppLayout from '../../components/shared/AppLayout'
 import { apiFetch } from '../../lib/api'
 import SpiralLoader from '../../components/shared/Loader'
 import { formatCohort } from '../../lib/format'
+import { useAuth } from '../../hooks/useAuth'
 
 export default function AdminAlerts() {
   const [alerts, setAlerts] = useState([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState(null)
   const [department, setDepartment] = useState('')
+  const { adminDepartment } = useAuth()
 
   useEffect(() => {
     fetchAlerts()
@@ -18,7 +20,7 @@ export default function AdminAlerts() {
     try {
       setLoading(true)
       const query = department ? `?department=${department}` : ''
-      const data = await apiFetch(`/api/v1/admin/alerts/low-attendance${query}`)
+      const data = await apiFetch(`/api/v1/admin/alerts/low-attendance${query}`, { cache: false, forceRefresh: true })
       setAlerts(data.data || [])
     } catch (err) {
       setError(err.message)
@@ -49,27 +51,30 @@ export default function AdminAlerts() {
       <div style={{ width: '100%' }} className="flex flex-col gap-6">
         <div>
           <h2 className="text-lg font-semibold text-gray-900 dark:text-white">Low Attendance Alerts</h2>
-          <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">Students with attendance below 60%</p>
+          <p className="text-sm text-gray-400 dark:text-gray-500 mt-1">Students with attendance below 75%</p>
         </div>
 
         {/* Filter */}
         <div className="flex gap-3">
-          <select
-            value={department}
-            onChange={(e) => {
-              setDepartment(e.target.value)
-            }}
-            onChangeCapture={() => fetchAlerts()}
-            className="flex-1 max-w-xs px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
+          {(!adminDepartment || adminDepartment === 'GLOBAL') && (
+            <select
+              value={department}
+              onChange={(e) => {
+                setDepartment(e.target.value)
+              }}
+              onChangeCapture={() => fetchAlerts()}
+              className="flex-1 max-w-xs px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
             <option value="">All Departments</option>
             <option value="CSE">CSE</option>
             <option value="IT">IT</option>
             <option value="ECE">ECE</option>
             <option value="EE">EE</option>
             <option value="ME">ME</option>
+            <option value="ME">ME</option>
             <option value="CE">CE</option>
           </select>
+          )}
           <button
             onClick={fetchAlerts}
             className="px-4 py-2.5 rounded-xl bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium transition-colors"

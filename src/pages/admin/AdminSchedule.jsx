@@ -66,6 +66,7 @@ export default function AdminSchedule() {
   const [modalTitle, setModalTitle] = useState('')
   const [modalBody, setModalBody] = useState(null)
   const resizeWarningShownRef = useRef(false)
+  const normalizedAdminDept = adminDepartment ? String(adminDepartment).trim().toUpperCase() : ''
 
   function openModal(title, body) {
     setModalTitle(title || '')
@@ -138,7 +139,7 @@ export default function AdminSchedule() {
 
   async function fetchAllCourses() {
     try {
-      const data = await apiFetch('/api/v1/admin/courses')
+      const data = await apiFetch('/api/v1/admin/courses?all=true')
       setAllCourses(data.data || [])
     } catch (err) { console.error('Error fetching courses:', err) }
   }
@@ -253,8 +254,9 @@ export default function AdminSchedule() {
 
       const yearMatch = dbYear === selYear || (dbYear.startsWith(selYear[0]) && selYear.length > 0)
       const sectionMatch = String(s.section || '').trim().toUpperCase() === String(selectedSection || '').trim().toUpperCase()
+      const deptMatch = !normalizedAdminDept || String(s.department || '').trim().toUpperCase() === normalizedAdminDept
 
-      return yearMatch && sectionMatch
+      return yearMatch && sectionMatch && deptMatch
     })
 
     const key = `Year ${selectedYear}-Sec ${selectedSection}`
@@ -284,7 +286,8 @@ export default function AdminSchedule() {
     if (!selectedYear || !selectedSection) return
     try {
       setLoading(true)
-      const data = await apiFetch(`/api/v1/admin/routines?year=${selectedYear}&section=${selectedSection}`)
+      const deptQuery = normalizedAdminDept ? `&department=${encodeURIComponent(normalizedAdminDept)}` : ''
+      const data = await apiFetch(`/api/v1/admin/routines?year=${selectedYear}&section=${selectedSection}${deptQuery}`)
       const fetchedRoutines = data.data || []
       setRoutines(fetchedRoutines)
 
@@ -368,7 +371,7 @@ export default function AdminSchedule() {
       setLoading(true)
       const payload = {
         name,
-        department: 'GLOBAL',
+        department: adminDepartment || 'GLOBAL',
         year: cohort.yearOfStudy,
         section: cohort.section,
         sourceRoutineId: copySource

@@ -3,6 +3,7 @@ import AppLayout from '../../components/shared/AppLayout'
 import { apiFetch } from '../../lib/api'
 import { formatYearSection } from '../../lib/format'
 import SpiralLoader from '../../components/shared/Loader'
+import { useAuth } from '../../hooks/useAuth'
 
 const DEPARTMENTS = [
   { code: 'CSE', name: 'Computer Science & Engineering' },
@@ -29,6 +30,7 @@ export default function AdminDepartments() {
   const [viewType, setViewType] = useState(null) // 'teachers' or 'students'
   const [detailsLoading, setDetailsLoading] = useState(false)
   const [detailsData, setDetailsData] = useState(null)
+  const { adminDepartment } = useAuth()
 
   useEffect(() => {
     fetchStats()
@@ -135,7 +137,7 @@ export default function AdminDepartments() {
         )}
 
         <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-4">
-          {DEPARTMENTS.map((dept) => {
+          {DEPARTMENTS.filter(dept => !adminDepartment || adminDepartment === 'GLOBAL' || dept.code === adminDepartment).map((dept) => {
             const deptCounts =
               departmentSummary[dept.code] || { students: 0, teachers: 0, courses: 0 }
 

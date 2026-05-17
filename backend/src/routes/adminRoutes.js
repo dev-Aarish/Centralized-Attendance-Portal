@@ -208,34 +208,53 @@ router.get('/teachers/workload', async (req, res) => {
     return res.status(500).json({ error: 'Internal server error' })
   }
 })
-/**
- * GET /api/v1/admin/stats
- * Get overall system statistics
- */
+// GET /api/v1/admin/stats
+// Get overall system statistics
 router.get('/stats', async (req, res) => {
   try {
     const supabase = req.supabase
+    const targetDept = req.adminDepartment && req.adminDepartment !== 'GLOBAL' ? req.adminDepartment.toUpperCase() : null
 
-    // Get counts
-    const [studentsData, teachersData, coursesData, sectionsData, profilesData] = await Promise.all([
-      supabase.from('student_profiles').select('id', { count: 'exact', head: true }),
-      supabase.from('teacher_profiles').select('id', { count: 'exact', head: true }),
-      supabase.from('courses').select('id', { count: 'exact', head: true }),
-      supabase.from('class_sections').select('id', { count: 'exact', head: true }),
-      supabase.from('profiles').select('role', { count: 'exact' }),
+    // Base queries
+    let studentQuery = supabase.from('student_profiles').select('id', { count: 'exact', head: true })
+    let teacherQuery = supabase.from('teacher_profiles').select('id', { count: 'exact', head: true })
+    let courseQuery = supabase.from('courses').select('id', { count: 'exact', head: true })
+    let sectionQuery = supabase.from('class_sections').select('id', { count: 'exact', head: true })
+    let adminProfileQuery = supabase.from('profiles').select('id', { count: 'exact', head: true }).eq('role', 'admin')
+
+    if (targetDept) {
+      studentQuery = studentQuery.eq('department', targetDept)
+      teacherQuery = teacherQuery.eq('department', targetDept)
+      courseQuery = courseQuery.in('department', [targetDept, 'GLOBAL', null])
+      sectionQuery = sectionQuery.eq('department', targetDept)
+    }
+
+    const [studentsData, teachersData, coursesData, sectionsData, adminsData] = await Promise.all([
+      studentQuery,
+      teacherQuery,
+      courseQuery,
+      sectionQuery,
+      adminProfileQuery
     ])
 
     // Get attendance sessions today
     const today = new Date().toISOString().split('T')[0]
-    const { data: todaySessions } = await supabase
+    let sessionQuery = supabase
       .from('attendance_sessions')
-      .select('id')
+      .select('id, class_sections!inner(department)')
       .eq('session_date', today)
 
+    if (targetDept) {
+      sessionQuery = sessionQuery.eq('class_sections.department', targetDept)
+    }
+    const { data: todaySessions } = await sessionQuery
+
     // Get low attendance students (< 60%)
-    const { data: students } = await supabase
-      .from('student_profiles')
-      .select('id')
+    let lowAttQuery = supabase.from('student_profiles').select('id')
+    if (targetDept) {
+      lowAttQuery = lowAttQuery.eq('department', targetDept)
+    }
+    const { data: students } = await lowAttQuery
 
     let lowAttendanceCount = 0
     for (const student of students || []) {
@@ -247,7 +266,7 @@ router.get('/stats', async (req, res) => {
       if (records && records.length > 0) {
         const presentCount = records.filter((r) => r.status === 'present').length
         const attendancePercent = (presentCount / records.length) * 100
-        if (attendancePercent < 60) lowAttendanceCount++
+        if (attendancePercent < 75) lowAttendanceCount++
       }
     }
 
@@ -260,9 +279,9 @@ router.get('/stats', async (req, res) => {
         sessionsToday: todaySessions?.length || 0,
         lowAttendanceAlerts: lowAttendanceCount,
         roleDistribution: {
-          students: profilesData.data?.filter((p) => p.role === 'student').length || 0,
-          teachers: profilesData.data?.filter((p) => p.role === 'teacher').length || 0,
-          admins: profilesData.data?.filter((p) => p.role === 'admin').length || 0,
+          students: studentsData.count || 0,
+          teachers: teachersData.count || 0,
+          admins: adminsData.count || 0,
         },
       },
     })
@@ -308,6 +327,23 @@ router.get('/users', async (req, res) => {
 
     // Filter by search if provided
     let filtered = data || []
+
+    if (req.adminDepartment && req.adminDepartment !== 'GLOBAL') {
+      const targetDept = req.adminDepartment.toUpperCase()
+      filtered = filtered.filter(u => {
+        if (u.id === req.user.id) return true
+        const spArr = Array.isArray(u.student_profiles) ? u.student_profiles : (u.student_profiles ? [u.student_profiles] : [])
+        const tpArr = Array.isArray(u.teacher_profiles) ? u.teacher_profiles : (u.teacher_profiles ? [u.teacher_profiles] : [])
+        const isStudentMatch = spArr.some(
+          sp => String(sp.department || '').trim().toUpperCase() === targetDept
+        )
+        const isTeacherMatch = tpArr.some(
+          tp => String(tp.department || '').trim().toUpperCase() === targetDept
+        )
+        return isStudentMatch || isTeacherMatch
+      })
+    }
+
     if (search) {
       const term = search.toLowerCase()
       filtered = filtered.filter(
@@ -475,7 +511,7 @@ router.get('/courses', async (req, res) => {
   try {
     const supabase = req.supabase
 
-    const { data, error } = await supabase
+    let query = supabase
       .from('courses')
       .select(`
         id,
@@ -486,7 +522,12 @@ router.get('/courses', async (req, res) => {
         type,
         class_sections (count)
       `)
-      .order('department, code')
+
+    if (req.adminDepartment && req.adminDepartment !== 'GLOBAL' && req.query.all !== 'true') {
+      query = query.in('department', [req.adminDepartment, 'GLOBAL', null])
+    }
+
+    const { data, error } = await query.order('department, code')
 
     if (error) {
       return res.status(500).json({ error: error.message })
@@ -525,6 +566,10 @@ router.post('/courses', async (req, res) => {
       })
     }
 
+    if (req.adminDepartment && req.adminDepartment !== 'GLOBAL' && req.adminDepartment !== department.toUpperCase()) {
+      return res.status(403).json({ error: 'Forbidden: You can only create courses for your own department.' })
+    }
+
     const { data, error } = await supabase
       .from('courses')
       .insert({
@@ -556,6 +601,14 @@ router.delete('/courses/:id', async (req, res) => {
   try {
     const { id: courseId } = req.params
     const supabase = req.supabase
+
+    // Optional: check ownership if not global
+    if (req.adminDepartment && req.adminDepartment !== 'GLOBAL') {
+      const { data: c } = await supabase.from('courses').select('department').eq('id', courseId).single()
+      if (c && c.department !== req.adminDepartment) {
+        return res.status(403).json({ error: 'Forbidden: Cannot delete course of another department.' })
+      }
+    }
 
     // Get all sections for this course
     const { data: sections, error: sectionsError } = await supabase
@@ -929,10 +982,12 @@ router.get('/attendance/report', async (req, res) => {
       report[courseKey].lateCount += records.filter((r) => r.status === 'late').length
     }
 
-    // Filter by department if provided
+    // Filter by department if provided or required by admin role
     let filtered = Object.values(report)
-    if (department) {
-      filtered = filtered.filter((r) => r.department === department)
+    const targetDept = req.adminDepartment && req.adminDepartment !== 'GLOBAL' ? req.adminDepartment.toUpperCase() : (department ? department.toUpperCase() : null)
+    
+    if (targetDept) {
+      filtered = filtered.filter((r) => normalizeDepartment(r.department) === targetDept)
     }
 
     return res.json({ data: filtered })
@@ -951,6 +1006,7 @@ router.get('/alerts/low-attendance', async (req, res) => {
   try {
     const { department } = req.query
     const supabase = req.supabase
+    const targetDept = req.adminDepartment && req.adminDepartment !== 'GLOBAL' ? req.adminDepartment.toUpperCase() : (department ? department.toUpperCase() : null)
 
     // Get all students
     let query = supabase.from('student_profiles').select(`
@@ -966,7 +1022,9 @@ router.get('/alerts/low-attendance', async (req, res) => {
       )
     `)
 
-    if (department) query = query.eq('department', department)
+    if (targetDept) {
+      query = query.eq('department', targetDept)
+    }
 
     const { data: students, error } = await query
 
@@ -986,7 +1044,7 @@ router.get('/alerts/low-attendance', async (req, res) => {
         const presentCount = records.filter((r) => r.status === 'present').length
         const attendancePercent = (presentCount / records.length) * 100
 
-        if (attendancePercent < 60) {
+        if (attendancePercent < 75) {
           alerts.push({
             studentId: student.profile_id,
             name: student.profiles?.full_name,
@@ -1111,7 +1169,7 @@ router.get('/departments/:department/sections', async (req, res) => {
 router.get('/sections/all', async (req, res) => {
   try {
     const supabase = req.supabase
-    const { data, error } = await supabase
+    let query = supabase
       .from('class_sections')
       .select(`
         id,
@@ -1127,7 +1185,12 @@ router.get('/sections/all', async (req, res) => {
           )
         )
       `)
-      .order('year_of_study, section, department')
+    
+    if (req.adminDepartment && req.adminDepartment !== 'GLOBAL') {
+      query = query.eq('department', req.adminDepartment)
+    }
+
+    const { data, error } = await query.order('year_of_study, section, department')
 
     if (error) return res.status(500).json({ error: error.message })
 
@@ -1178,7 +1241,14 @@ router.get('/routines', async (req, res) => {
       .eq('year_of_study', numYear)
       .eq('section', section)
 
-    if (department) {
+    if (req.adminDepartment && req.adminDepartment !== 'GLOBAL') {
+      const allowedDepts = [req.adminDepartment, 'GLOBAL']
+      if (department && allowedDepts.includes(department)) {
+        query = query.eq('department', department)
+      } else {
+        query = query.in('department', allowedDepts)
+      }
+    } else if (department) {
       query = query.eq('department', department)
     }
 
@@ -1203,7 +1273,11 @@ router.post('/routines', async (req, res) => {
     const supabase = req.supabase
     const db = supabaseAdmin || supabase
     const numYear = normalizeYear(year)
-    const effectiveDept = department || 'GLOBAL'
+    
+    // Force routine's department to HOD's department to prevent cross-department routine creation
+    const effectiveDept = (req.adminDepartment && req.adminDepartment !== 'GLOBAL')
+      ? req.adminDepartment
+      : (department || 'GLOBAL')
 
     if (!name || numYear === null || !section) {
       return res.status(400).json({ error: 'Missing required fields' })
@@ -1215,6 +1289,7 @@ router.post('/routines', async (req, res) => {
       .select('id', { count: 'exact', head: true })
       .eq('year_of_study', numYear)
       .eq('section', section)
+      .eq('department', effectiveDept)
 
     const isFirst = count === 0
 
@@ -1296,12 +1371,20 @@ router.put('/routines/:id/activate', async (req, res) => {
 
     if (!routine) return res.status(404).json({ error: 'Routine not found' })
 
-    // Deactivate all others in the same cohort (across ALL departments)
+    // Check authorization: non-global admins can only activate their department's routines
+    if (req.adminDepartment && req.adminDepartment !== 'GLOBAL') {
+      if (routine.department !== req.adminDepartment) {
+        return res.status(403).json({ error: 'You are not authorized to activate routines of other departments.' })
+      }
+    }
+
+    // Deactivate all others in the same cohort within the SAME department
     await db
       .from('class_routines')
       .update({ is_active: false })
       .eq('year_of_study', routine.year_of_study)
       .eq('section', routine.section)
+      .eq('department', routine.department)
 
     // Activate the chosen one
     const { data, error } = await db
@@ -1333,11 +1416,19 @@ router.delete('/routines/:id', async (req, res) => {
     // Prevent deleting the active routine
     const { data: routine } = await db
       .from('class_routines')
-      .select('is_active')
+      .select('is_active, department')
       .eq('id', id)
       .single()
 
     if (!routine) return res.status(404).json({ error: 'Routine not found' })
+
+    // Check authorization: non-global admins can only delete their department's routines
+    if (req.adminDepartment && req.adminDepartment !== 'GLOBAL') {
+      if (routine.department !== req.adminDepartment) {
+        return res.status(403).json({ error: 'You are not authorized to delete routines of other departments.' })
+      }
+    }
+
     if (routine.is_active) {
       return res.status(400).json({ error: 'Cannot delete the active routine. Please activate another routine first.' })
     }
@@ -1365,10 +1456,21 @@ router.get('/departments/summary', async (req, res) => {
   try {
     const supabase = req.supabase
 
+    let studentQuery = supabase.from('student_profiles').select('department')
+    let teacherQuery = supabase.from('teacher_profiles').select('department')
+    let courseQuery = supabase.from('courses').select('department')
+
+    if (req.adminDepartment && req.adminDepartment !== 'GLOBAL') {
+      const targetDept = req.adminDepartment.toUpperCase()
+      studentQuery = studentQuery.eq('department', targetDept)
+      teacherQuery = teacherQuery.eq('department', targetDept)
+      courseQuery = courseQuery.in('department', [targetDept, 'GLOBAL', null])
+    }
+
     const [studentsResult, teachersResult, coursesResult] = await Promise.all([
-      supabase.from('student_profiles').select('department'),
-      supabase.from('teacher_profiles').select('department'),
-      supabase.from('courses').select('department'),
+      studentQuery,
+      teacherQuery,
+      courseQuery,
     ])
 
     if (studentsResult.error || teachersResult.error || coursesResult.error) {
@@ -1438,7 +1540,8 @@ router.get('/schedules', async (req, res) => {
         routine_id,
         course_id,
         teacher_id,
-        courses (id, code, name)
+        courses (id, code, name),
+        class_sections!inner (id, department)
       `)
 
     if (routineId) {
@@ -1448,6 +1551,10 @@ router.get('/schedules', async (req, res) => {
       query = query.in('class_section_id', ids)
     } else {
       return res.status(400).json({ error: 'routineId or sectionIds is required' })
+    }
+
+    if (req.adminDepartment && req.adminDepartment !== 'GLOBAL') {
+      query = query.eq('class_sections.department', req.adminDepartment)
     }
 
     const { data, error } = await query.order('day')
@@ -1590,11 +1697,16 @@ router.put('/schedules/replace', async (req, res) => {
 
       let cohort = null
       if (sectionIds && sectionIds.length > 0) {
-        const { data: refSections } = await db
+        let sectionsQuery = db
           .from('class_sections')
           .select('*')
           .in('id', sectionIds)
-          .limit(1)
+        
+        if (req.adminDepartment && req.adminDepartment !== 'GLOBAL') {
+          sectionsQuery = sectionsQuery.eq('department', req.adminDepartment)
+        }
+          
+        const { data: refSections } = await sectionsQuery.limit(1)
         if (refSections?.length) cohort = refSections[0]
       }
 
@@ -1603,7 +1715,7 @@ router.put('/schedules/replace', async (req, res) => {
         if (!numYear || numYear < 1 || numYear > 4) {
           return res.status(400).json({ error: `Invalid year value: "${year}" (resolved to ${numYear}). Expected 1-4.` })
         }
-        cohort = { year_of_study: numYear, section: String(section).trim().toUpperCase(), department: req.body.adminDepartment || 'GLOBAL' }
+        cohort = { year_of_study: numYear, section: String(section).trim().toUpperCase(), department: req.adminDepartment && req.adminDepartment !== 'GLOBAL' ? req.adminDepartment : (req.body.adminDepartment || 'GLOBAL') }
       }
 
       if (!cohort) {
@@ -1664,6 +1776,19 @@ router.put('/schedules/replace', async (req, res) => {
         }
 
         if (finalSectionId) {
+          // Verify that this section belongs to the HOD's department
+          const { data: secCheck } = await db
+            .from('class_sections')
+            .select('department')
+            .eq('id', finalSectionId)
+            .single()
+
+          if (secCheck && req.adminDepartment && req.adminDepartment !== 'GLOBAL') {
+            if (secCheck.department !== req.adminDepartment) {
+              return res.status(403).json({ error: `You are not authorized to schedule classes for department "${secCheck.department}".` })
+            }
+          }
+
           processedSchedules.push({
             class_section_id: finalSectionId,
             course_id: s.course_id,
@@ -1783,10 +1908,28 @@ router.put('/schedules/replace', async (req, res) => {
       }
 
       // 4. Now mutate DB only after all validations pass.
-      const { error: deleteError } = await db
+      // Fetch all section IDs belonging to the cohort's department to only delete this department's schedule blocks
+      const { data: deptSections } = await db
+        .from('class_sections')
+        .select('id')
+        .eq('department', cohort.department)
+        .eq('year_of_study', cohortYearOrdinal)
+        .eq('section', cohort.section)
+
+      const deptSectionIds = (deptSections || []).map(s => s.id)
+
+      let deleteQuery = db
         .from('class_schedules')
         .delete()
         .eq('routine_id', routineId)
+
+      if (deptSectionIds.length > 0) {
+        deleteQuery = deleteQuery.in('class_section_id', deptSectionIds)
+      } else {
+        deleteQuery = deleteQuery.eq('id', '00000000-0000-0000-0000-000000000000') // delete nothing
+      }
+
+      const { error: deleteError } = await deleteQuery
 
       if (deleteError) {
         return res.status(400).json({ error: deleteError.message })
@@ -1805,10 +1948,31 @@ router.put('/schedules/replace', async (req, res) => {
     }
 
     // No schedules passed: clear current routine schedules safely.
-    const { error: deleteError } = await db
+    const cohortYearNum = typeof year === 'number' ? year : normalizeYear(year)
+    const cohortYearOrdinal = yearToOrdinal(cohortYearNum)
+    const targetDept = req.adminDepartment && req.adminDepartment !== 'GLOBAL' ? req.adminDepartment : (req.body.adminDepartment || 'GLOBAL')
+    
+    const { data: deptSections } = await db
+      .from('class_sections')
+      .select('id')
+      .eq('department', targetDept)
+      .eq('year_of_study', cohortYearOrdinal)
+      .eq('section', String(section).trim().toUpperCase())
+
+    const deptSectionIds = (deptSections || []).map(s => s.id)
+
+    let deleteQuery = db
       .from('class_schedules')
       .delete()
       .eq('routine_id', routineId)
+
+    if (deptSectionIds.length > 0) {
+      deleteQuery = deleteQuery.in('class_section_id', deptSectionIds)
+    } else {
+      deleteQuery = deleteQuery.eq('id', '00000000-0000-0000-0000-000000000000') // delete nothing
+    }
+
+    const { error: deleteError } = await deleteQuery
 
     if (deleteError) {
       return res.status(400).json({ error: deleteError.message })
@@ -2014,6 +2178,12 @@ router.get('/departments/:code/teachers', async (req, res) => {
     const supabase = req.supabase
     const normalizedCode = normalizeDepartment(code)
 
+    if (req.adminDepartment && req.adminDepartment !== 'GLOBAL') {
+      if (normalizedCode !== req.adminDepartment) {
+        return res.status(403).json({ error: 'Unauthorized: Cannot view teachers of other departments' })
+      }
+    }
+
     const { data: teacherProfiles, error } = await supabase
       .from('teacher_profiles')
       .select('id, profile_id, employee_id, department')
@@ -2074,6 +2244,12 @@ router.get('/departments/:code/students', async (req, res) => {
     const { code } = req.params
     const supabase = req.supabase
     const normalizedCode = normalizeDepartment(code)
+
+    if (req.adminDepartment && req.adminDepartment !== 'GLOBAL') {
+      if (normalizedCode !== req.adminDepartment) {
+        return res.status(403).json({ error: 'Unauthorized: Cannot view students of other departments' })
+      }
+    }
 
     const { data: studentProfiles, error } = await supabase
       .from('student_profiles')

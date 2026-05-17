@@ -57,11 +57,31 @@ function normalizeSection(value) {
   return String(value).trim().toUpperCase()
 }
 
+function normalizeAdminDepartment(value) {
+  const normalized = normalizeDepartment(value)
+  return normalized ? normalized.toUpperCase() : null
+}
+
+function isKnownAdminEmail(email) {
+  if (!email) return false
+  const lower = email.toLowerCase()
+  if (lower === 'admin@heritageit.edu.in' || lower === 'admin@heritageit.edu') return true
+  if (lower.includes('-hod@') || lower.includes('.hod@')) return true
+  return false
+}
+
 function getDepartmentFromEmail(email) {
   if (!email) return null
   const localPart = email.split('@')[0].toUpperCase()
-  const DEPARTMENTS = ['CSE', 'IT', 'ECE', 'EE', 'ME', 'CE', 'AEIE', 'CSBS', 'CSDS', 'AIML', 'ChE', 'Mathematics', 'Physics']
-  return DEPARTMENTS.find(d => d === localPart) || null
+  const DEPARTMENTS = ['CSE', 'IT', 'ECE', 'EE', 'ME', 'CE', 'AEIE', 'CSBS', 'CSDS', 'AIML', 'CHE', 'MATHEMATICS', 'PHYSICS']
+
+  for (const dept of DEPARTMENTS) {
+    const regex = new RegExp(`(^|[^A-Z])${dept}([^A-Z]|$)`)
+    if (regex.test(localPart)) return dept
+  }
+
+  const normalized = normalizeAdminDepartment(localPart)
+  return DEPARTMENTS.includes(normalized) ? normalized : null
 }
 
 function matchesStudentCohort(studentYear, studentSemester, sectionYear, sectionSemester) {
@@ -164,8 +184,30 @@ router.get('/me', async (req, res) => {
       .eq('id', req.user.id)
       .single()
 
-    if (error) return res.status(400).json({ error: error.message })
-    return res.json({ data })
+    let role = data?.role || req.user?.app_metadata?.role || req.user?.user_metadata?.role || null
+    const email = req.user?.email || null
+    
+    if (!role && isKnownAdminEmail(email)) {
+      role = 'admin'
+    }
+
+    if (error && role !== 'admin') {
+      return res.status(400).json({ error: error.message })
+    }
+
+    const payload = data || {
+      id: req.user.id,
+      email: email,
+      role: role,
+      full_name: req.user?.user_metadata?.full_name || req.user?.user_metadata?.name || null,
+      department: req.user?.user_metadata?.department || req.user?.app_metadata?.department || null
+    }
+
+    if (payload.role === 'admin' && !payload.department) {
+      payload.department = getDepartmentFromEmail(email)
+    }
+
+    return res.json({ data: payload })
   } catch (err) {
     console.error('GET /profile/me error:', err)
     return res.status(500).json({ error: 'Internal server error' })
@@ -237,22 +279,29 @@ router.get('/role', async (req, res) => {
       .eq('id', req.user.id)
       .single()
 
+    let role = data?.role || req.user?.app_metadata?.role || req.user?.user_metadata?.role || null
+    const email = req.user?.email || null
+    let adminDept = normalizeAdminDepartment(data?.department || req.user?.user_metadata?.department || req.user?.app_metadata?.department)
+
+    if (!role && isKnownAdminEmail(email)) {
+      role = 'admin'
+    }
+
     if (error || !data) {
-      // If error is just missing column, we still want the role
+      // If error is just missing column or row, we still want the role
       console.warn('GET /profile/role fetch warning:', error?.message)
       return res.json({
         data: {
-          role: data?.role || null,
-          adminDepartment: data?.department || null,
-          requiresOnboarding: !(data?.role),
+          role: role,
+          adminDepartment: role === 'admin' ? (adminDept || getDepartmentFromEmail(email)) : null,
+          requiresOnboarding: !role,
         },
       })
     }
     
     // If admin, infer department from email if column is empty
-    let adminDept = data.department || null
-    if (data.role === 'admin' && !adminDept) {
-      adminDept = getDepartmentFromEmail(data.email)
+    if (role === 'admin' && !adminDept) {
+      adminDept = getDepartmentFromEmail(email)
     }
 
     let requiresOnboarding = false

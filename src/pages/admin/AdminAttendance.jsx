@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import AppLayout from '../../components/shared/AppLayout'
 import { apiFetch } from '../../lib/api'
 import SpiralLoader from '../../components/shared/Loader'
+import { useAuth } from '../../hooks/useAuth'
 
 export default function AdminAttendance() {
   const [report, setReport] = useState([])
@@ -10,6 +11,7 @@ export default function AdminAttendance() {
   const [department, setDepartment] = useState('')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
+  const { adminDepartment } = useAuth()
 
   useEffect(() => {
     fetchReport()
@@ -54,19 +56,21 @@ export default function AdminAttendance() {
 
         {/* Filters */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-          <select
-            value={department}
-            onChange={(e) => setDepartment(e.target.value)}
-            className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-          >
-            <option value="">All Departments</option>
-            <option value="CSE">CSE</option>
-            <option value="IT">IT</option>
-            <option value="ECE">ECE</option>
-            <option value="EE">EE</option>
-            <option value="ME">ME</option>
-            <option value="CE">CE</option>
-          </select>
+          {(!adminDepartment || adminDepartment === 'GLOBAL') && (
+            <select
+              value={department}
+              onChange={(e) => setDepartment(e.target.value)}
+              className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+            >
+              <option value="">All Departments</option>
+              <option value="CSE">CSE</option>
+              <option value="IT">IT</option>
+              <option value="ECE">ECE</option>
+              <option value="EE">EE</option>
+              <option value="ME">ME</option>
+              <option value="CE">CE</option>
+            </select>
+          )}
           <input
             type="date"
             value={startDate}

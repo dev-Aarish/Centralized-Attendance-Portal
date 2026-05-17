@@ -74,7 +74,7 @@ export default function AdminAssignCourses() {
 
   async function fetchCourses() {
     try {
-      const data = await apiFetch('/api/v1/admin/courses')
+      const data = await apiFetch('/api/v1/admin/courses?all=true')
       const filtered = (data.data || []).filter(c => !['LIB', 'REM', 'LUNCH'].includes((c.code || '').trim().toUpperCase()))
       setCourses(filtered)
     } catch (err) {

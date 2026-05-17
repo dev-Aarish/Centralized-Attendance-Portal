@@ -41,10 +41,65 @@ export async function requireAuth(req, res, next) {
       return res.status(403).json({ error: 'Only heritageit.edu.in / heritageit.edu accounts are allowed.' })
     }
 
+    const userClient = createUserClient(token)
+    let profile = null
+
+    if (supabaseAdmin) {
+      const { data: adminProfile, error: adminError } = await supabaseAdmin
+        .from('profiles')
+        .select('id')
+        .eq('id', user.id)
+        .maybeSingle()
+
+      if (!adminError) {
+        profile = adminProfile
+      }
+    }
+
+    if (!profile) {
+      const { data: userProfile } = await userClient
+        .from('profiles')
+        .select('id')
+        .eq('id', user.id)
+        .maybeSingle()
+
+      profile = userProfile
+    }
+
+    if (!profile) {
+      const fullName = user.user_metadata?.full_name || user.user_metadata?.name || null
+      const payload = {
+        id: user.id,
+        email: user.email,
+        full_name: fullName,
+        role: null,
+      }
+
+      let insertError = null
+
+      if (supabaseAdmin) {
+        const { error } = await supabaseAdmin
+          .from('profiles')
+          .upsert(payload, { onConflict: 'id' })
+        insertError = error
+      }
+
+      if (!supabaseAdmin || insertError) {
+        const { error } = await userClient
+          .from('profiles')
+          .upsert(payload, { onConflict: 'id' })
+        insertError = error
+      }
+
+      if (insertError) {
+        console.error('Failed to create profile row:', insertError)
+      }
+    }
+
     // Attach user info and a user-scoped Supabase client to the request
     req.user = user
     req.accessToken = token
-    req.supabase = createUserClient(token)
+    req.supabase = userClient
 
     next()
   } catch (err) {

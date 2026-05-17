@@ -2,6 +2,7 @@ import { useState, useEffect } from 'react'
 import AppLayout from '../../components/shared/AppLayout'
 import { apiFetch } from '../../lib/api'
 import SpiralLoader from '../../components/shared/Loader'
+import { useAuth } from '../../hooks/useAuth'
 
 export default function AdminCourses() {
   const [courses, setCourses] = useState([])
@@ -12,6 +13,7 @@ export default function AdminCourses() {
   const [submitting, setSubmitting] = useState(false)
   const [filterDepartment, setFilterDepartment] = useState('All')
   const [filterSemester, setFilterSemester] = useState('All')
+  const { adminDepartment } = useAuth()
 
   // Expandable teacher details
   const [expandedCourseId, setExpandedCourseId] = useState(null)
@@ -40,7 +42,8 @@ export default function AdminCourses() {
   }
 
   async function handleCreateCourse() {
-    if (!formData.code || !formData.name || !formData.department || !formData.semester) {
+    const submitDept = (!adminDepartment || adminDepartment === 'GLOBAL') ? formData.department : adminDepartment
+    if (!formData.code || !formData.name || !submitDept || !formData.semester) {
       setError('All fields are required')
       return
     }
@@ -49,7 +52,7 @@ export default function AdminCourses() {
       setSubmitting(true)
       await apiFetch('/api/v1/admin/courses', {
         method: 'POST',
-        body: JSON.stringify(formData),
+        body: JSON.stringify({ ...formData, department: submitDept }),
       })
       setFormData({ code: '', name: '', department: '', semester: '', type: 'Lecture' })
       setShowForm(false)
@@ -157,16 +160,18 @@ export default function AdminCourses() {
           </button>
           
           <div className="flex items-center gap-3">
-            <select
-              value={filterDepartment}
-              onChange={(e) => setFilterDepartment(e.target.value)}
-              className="px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-            >
-              <option value="All">All Departments</option>
-              {Array.from(new Set(courses.map(c => c.department))).filter(Boolean).sort().map(dept => (
-                <option key={dept} value={dept}>{dept}</option>
-              ))}
-            </select>
+            {(!adminDepartment || adminDepartment === 'GLOBAL') && (
+              <select
+                value={filterDepartment}
+                onChange={(e) => setFilterDepartment(e.target.value)}
+                className="px-3 py-2 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+              >
+                <option value="All">All Departments</option>
+                {Array.from(new Set(courses.map(c => c.department))).filter(Boolean).sort().map(dept => (
+                  <option key={dept} value={dept}>{dept}</option>
+                ))}
+              </select>
+            )}
             
             <select
               value={filterSemester}
@@ -210,26 +215,28 @@ export default function AdminCourses() {
               </select>
             </div>
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <select
-                value={formData.department}
-                onChange={(e) => setFormData({ ...formData, department: e.target.value })}
-                className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="">Select Department</option>
-                <option value="CSE">CSE</option>
-                <option value="IT">IT</option>
-                <option value="ECE">ECE</option>
-                <option value="EE">EE</option>
-                <option value="ME">ME</option>
-                <option value="CE">CE</option>
-                <option value="AEIE">AEIE</option>
-                <option value="CSBS">CSBS</option>
-                <option value="CSDS">CSDS</option>
-                <option value="AIML">AIML</option>
-                <option value="ChE">ChE</option>
-                <option value="Mathematics">Mathematics</option>
-                <option value="Physics">Physics</option>
-              </select>
+              {(!adminDepartment || adminDepartment === 'GLOBAL') && (
+                <select
+                  value={formData.department}
+                  onChange={(e) => setFormData({ ...formData, department: e.target.value })}
+                  className="px-3 py-2.5 rounded-xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-800 text-sm text-gray-900 dark:text-white focus:outline-none focus:ring-2 focus:ring-blue-500"
+                >
+                  <option value="">Select Department</option>
+                  <option value="CSE">CSE</option>
+                  <option value="IT">IT</option>
+                  <option value="ECE">ECE</option>
+                  <option value="EE">EE</option>
+                  <option value="ME">ME</option>
+                  <option value="CE">CE</option>
+                  <option value="AEIE">AEIE</option>
+                  <option value="CSBS">CSBS</option>
+                  <option value="CSDS">CSDS</option>
+                  <option value="AIML">AIML</option>
+                  <option value="ChE">ChE</option>
+                  <option value="Mathematics">Mathematics</option>
+                  <option value="Physics">Physics</option>
+                </select>
+              )}
               <input
                 type="number"
                 min="1"
