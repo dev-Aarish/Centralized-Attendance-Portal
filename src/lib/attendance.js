@@ -241,3 +241,17 @@ export function buildForecastTable(totalClasses, attendedCount, futureSessions =
     threshold: ATTENDANCE_THRESHOLD,
   }))
 }
+
+// Teacher Performance API
+
+export async function getTeacherPerformanceStats() {
+  return apiFetch('/api/v1/attendance/teacher/performance')
+    .then(r => ({ data: r.data || [], error: null }))
+    .catch(err => ({ data: [], error: err }))
+}
+
+export async function getSectionPerformanceDetails(sectionId) {
+  return apiFetch(`/api/v1/attendance/teacher/performance/sections/${sectionId}`)
+    .then(r => ({ data: r.data || [], error: null }))
+    .catch(err => ({ data: [], error: err }))
+}

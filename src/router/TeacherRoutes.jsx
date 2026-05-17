@@ -9,6 +9,7 @@ const TeacherAssignments = lazy(() => import('../pages/teacher/TeacherAssignment
 const TeacherQuestionSelector = lazy(() => import('../pages/teacher/TeacherQuestionSelector'))
 const TeacherNotes = lazy(() => import('../pages/teacher/TeacherNotes'))
 const TeacherSchedule = lazy(() => import('../pages/teacher/TeacherSchedule'))
+const TeacherPerformance = lazy(() => import('../pages/teacher/TeacherPerformance'))
 
 export default function TeacherRoutes() {
   return (
@@ -22,6 +23,7 @@ export default function TeacherRoutes() {
         <Route path="assignments/questions" element={<TeacherQuestionSelector />} />
         <Route path="notes" element={<TeacherNotes />} />
         <Route path="schedule" element={<TeacherSchedule />} />
+        <Route path="performance" element={<TeacherPerformance />} />
         <Route path="*" element={<Navigate to="/dashboard" replace />} />
       </Routes>
     </Suspense>

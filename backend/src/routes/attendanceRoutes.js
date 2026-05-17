@@ -1261,4 +1261,140 @@ router.get('/dashboard-summary', async (req, res) => {
   }
 })
 
+// --- TEACHER PERFORMANCE ROUTES ---
+
+// GET /api/v1/attendance/teacher/performance
+router.get('/teacher/performance', async (req, res) => {
+  try {
+    const db = supabaseAdmin || req.supabase
+    const { data: teacherProfile } = await req.supabase
+      .from('teacher_profiles')
+      .select('id')
+      .eq('profile_id', req.user.id)
+      .single()
+
+    if (!teacherProfile) return res.status(404).json({ error: 'Teacher profile not found' })
+
+    const { data: assignments, error: assignErr } = await db
+      .from('teacher_assignments')
+      .select(`
+        class_section_id,
+        class_sections (
+          id, year_of_study, section, department,
+          courses ( code, name )
+        )
+      `)
+      .eq('teacher_id', teacherProfile.id)
+
+    if (assignErr) throw assignErr
+    const sectionIds = assignments.map(a => a.class_section_id)
+
+    if (sectionIds.length === 0) return res.json({ data: [] })
+
+    const { data: sessions, error: sessErr } = await db
+      .from('attendance_sessions')
+      .select('id, class_section_id')
+      .in('class_section_id', sectionIds)
+
+    if (sessErr) throw sessErr
+
+    const sessionIds = sessions.map(s => s.id)
+    let records = []
+    if (sessionIds.length > 0) {
+      const { data: recs, error: recErr } = await db
+        .from('attendance_records')
+        .select('session_id, status')
+        .in('session_id', sessionIds)
+      if (recErr) throw recErr
+      records = recs || []
+    }
+
+    const performanceData = assignments.map(assignment => {
+      const secId = assignment.class_section_id
+      const secSessions = sessions.filter(s => s.class_section_id === secId)
+      const secRecs = records.filter(r => secSessions.some(s => s.id === r.session_id))
+      
+      const totalStudentsPresent = secRecs.filter(r => r.status === 'present').length
+      const totalRecords = secRecs.length
+      const overallPercentage = totalRecords > 0 ? Math.round((totalStudentsPresent / totalRecords) * 100) : 0
+
+      return {
+        sectionId: secId,
+        subjectName: assignment.class_sections?.courses?.name || 'Unknown Subject',
+        subjectCode: assignment.class_sections?.courses?.code || '???',
+        department: assignment.class_sections?.department,
+        section: assignment.class_sections?.section,
+        year: assignment.class_sections?.year_of_study,
+        totalSessions: secSessions.length,
+        overallPercentage
+      }
+    }).sort((a, b) => b.overallPercentage - a.overallPercentage)
+
+    return res.json({ data: performanceData })
+  } catch (err) {
+    console.error('GET /attendance/teacher/performance error:', err)
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
+// GET /api/v1/attendance/teacher/performance/sections/:id
+router.get('/teacher/performance/sections/:id', async (req, res) => {
+  try {
+    const db = supabaseAdmin || req.supabase
+    const sectionId = req.params.id
+
+    const { data: sessions, error: sessErr } = await db
+      .from('attendance_sessions')
+      .select('id')
+      .eq('class_section_id', sectionId)
+
+    if (sessErr) throw sessErr
+    
+    const sessionIds = sessions.map(s => s.id)
+    let records = []
+    if (sessionIds.length > 0) {
+      const { data: recs, error: recErr } = await db
+        .from('attendance_records')
+        .select(`
+          status,
+          student_id,
+          student_profiles!inner (
+            id,
+            roll_number,
+            profiles ( full_name )
+          )
+        `)
+        .in('session_id', sessionIds)
+      if (recErr) throw recErr
+      records = recs || []
+    }
+
+    const studentMap = {}
+    records.forEach(r => {
+      const sid = r.student_id
+      if (!studentMap[sid]) {
+        studentMap[sid] = {
+          studentId: sid,
+          rollNumber: r.student_profiles?.roll_number,
+          fullName: r.student_profiles?.profiles?.full_name || 'Unknown',
+          attendedClasses: 0,
+          totalClasses: 0
+        }
+      }
+      studentMap[sid].totalClasses++
+      if (r.status === 'present') studentMap[sid].attendedClasses++
+    })
+
+    const data = Object.values(studentMap).map(s => {
+      s.percentage = s.totalClasses > 0 ? Math.round((s.attendedClasses / s.totalClasses) * 100) : 0
+      return s
+    }).sort((a, b) => b.percentage - a.percentage)
+
+    return res.json({ data })
+  } catch (err) {
+    console.error('GET /attendance/teacher/performance/sections/:id error:', err)
+    return res.status(500).json({ error: 'Internal server error' })
+  }
+})
+
 export default router

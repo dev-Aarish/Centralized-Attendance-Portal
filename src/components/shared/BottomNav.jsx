@@ -13,8 +13,8 @@ const linksByRole = {
     { to: '/dashboard', label: 'Home' },
     { to: '/courses', label: 'Courses' },
     { to: '/attendance', label: 'Attend.' },
+    { to: '/performance', label: 'Perf.' },
     { to: '/assignments', label: 'Tasks' },
-    { to: '/notes', label: 'Notes' },
   ],
   admin: [
     { to: '/dashboard', label: 'Home' },
