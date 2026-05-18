@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react'
 import { useAuth } from '../../hooks/useAuth'
 import { signOut } from '../../lib/auth'
-import { createAnnouncement, getAnnouncements } from '../../lib/announcements'
+import { createAnnouncement, getAnnouncements, getAnnouncementFilters, clearAnnouncements, deleteAnnouncement, dismissAnnouncement } from '../../lib/announcements'
 import { getMyProfile, getMyStudentProfile, getMyTeacherProfile, uploadMyAvatar } from '../../lib/profile'
 import { useToast } from './ToastProvider'
 
@@ -63,6 +63,15 @@ export default function TopHeader({ title }) {
   const [newPinnedUntil, setNewPinnedUntil] = useState('')
   const [announcementSearch, setAnnouncementSearch] = useState('')
   const [posting, setPosting] = useState(false)
+  const [showClearConfirm, setShowClearConfirm] = useState(false)
+  const [pendingDeleteId, setPendingDeleteId] = useState(null)
+  const [announcementFilters, setAnnouncementFilters] = useState({
+    student: { departments: [], years: [], sections: [] },
+    teacher: { departments: [] },
+  })
+  const [studentTarget, setStudentTarget] = useState({ department: '', yearOfStudy: '', section: '' })
+  const [teacherTarget, setTeacherTarget] = useState({ department: '' })
+  const [targetRoles, setTargetRoles] = useState({ students: true, teachers: false })
   const [studentLastSeenAt, setStudentLastSeenAt] = useState(null)
   const [profileFullName, setProfileFullName] = useState(null)
   const [profileData, setProfileData] = useState(() => {
@@ -143,6 +152,14 @@ export default function TopHeader({ title }) {
       setLoading(false)
     }
 
+    async function loadAnnouncementFilters() {
+      const { data, error: filtersError } = await getAnnouncementFilters()
+      if (filtersError) {
+        return
+      }
+      if (data) setAnnouncementFilters(data)
+    }
+
     async function loadProfileDetails() {
       setProfileLoading(true)
       setProfileError(null)
@@ -184,8 +201,19 @@ export default function TopHeader({ title }) {
     }
 
     loadAnnouncements()
+    loadAnnouncementFilters()
     loadProfileDetails()
   }, [user?.id, studentLastSeenKey, role])
+
+  useEffect(() => {
+    if (role === 'admin') {
+      setTargetRoles({ students: true, teachers: true })
+      return
+    }
+    if (role === 'teacher') {
+      setTargetRoles({ students: true, teachers: false })
+    }
+  }, [role])
 
   async function handleSignOut() {
     try {
@@ -289,13 +317,42 @@ export default function TopHeader({ title }) {
       return
     }
 
+    if (newPinnedUntil) {
+      const today = new Date()
+      const todayKey = new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), today.getUTCDate()))
+      const picked = new Date(`${newPinnedUntil}T00:00:00Z`)
+      if (picked < todayKey) {
+        const msg = 'Pinned until must be today or a future date.'
+        setError(msg)
+        addToast({ type: 'error', title: 'Invalid date', message: msg })
+        return
+      }
+    }
+
     setPosting(true)
     setError(null)
+
+    const selectedRoles = []
+    if (role === 'teacher') {
+      selectedRoles.push('student')
+    } else {
+      if (targetRoles.students) selectedRoles.push('student')
+      if (targetRoles.teachers) selectedRoles.push('teacher')
+    }
 
     const { data, error: createError } = await createAnnouncement({
       title: newTitle.trim(),
       message: newMessage.trim(),
       pinnedUntil: newPinnedUntil || null,
+      targetRoles: selectedRoles,
+      studentTarget: {
+        department: studentTarget.department || null,
+        yearOfStudy: studentTarget.yearOfStudy || null,
+        section: studentTarget.section || null,
+      },
+      teacherTarget: {
+        department: teacherTarget.department || null,
+      },
     })
 
     if (createError || !data) {
@@ -310,8 +367,41 @@ export default function TopHeader({ title }) {
     setNewTitle('')
     setNewMessage('')
     setNewPinnedUntil('')
+    setStudentTarget({ department: '', yearOfStudy: '', section: '' })
+    setTeacherTarget({ department: '' })
     setPosting(false)
     addToast({ type: 'success', title: 'Announcement posted', message: 'Announcement published successfully.' })
+  }
+
+  async function handleClearAnnouncements() {
+    const { error: clearError } = await clearAnnouncements()
+    if (clearError) {
+      const msg = clearError?.message || 'Failed to clear announcements.'
+      addToast({ type: 'error', title: 'Clear failed', message: msg })
+      return
+    }
+    setAnnouncements([])
+    setShowClearConfirm(false)
+  }
+
+  async function handleDeleteAnnouncement(announcementId) {
+    const { error: deleteError } = await deleteAnnouncement(announcementId)
+    if (deleteError) {
+      const msg = deleteError?.message || 'Failed to delete announcement.'
+      addToast({ type: 'error', title: 'Delete failed', message: msg })
+      return
+    }
+    setAnnouncements((prev) => prev.filter((item) => item.id !== announcementId))
+  }
+
+  async function handleDismissAnnouncement(announcementId) {
+    const { error: dismissError } = await dismissAnnouncement(announcementId)
+    if (dismissError) {
+      const msg = dismissError?.message || 'Failed to hide announcement.'
+      addToast({ type: 'error', title: 'Dismiss failed', message: msg })
+      return
+    }
+    setAnnouncements((prev) => prev.filter((item) => item.id !== announcementId))
   }
 
   function toggleAnnouncements() {
@@ -326,8 +416,8 @@ export default function TopHeader({ title }) {
   }
 
   return (
-    <header className="h-14 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 flex items-center justify-between px-6 shrink-0">
-      <h1 className="text-sm font-semibold text-gray-800 dark:text-white">
+    <header className="min-h-16 md:min-h-20 border-b border-gray-100 dark:border-gray-800 bg-white dark:bg-gray-900 flex items-center justify-between px-6 shrink-0">
+      <h1 className="text-2xl md:text-3xl font-extrabold tracking-tight text-gray-900 dark:text-white">
         {title}
       </h1>
       <div className="flex items-center gap-3 relative">
@@ -400,6 +490,80 @@ export default function TopHeader({ title }) {
                   rows={3}
                   className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm resize-none"
                 />
+                <div className="flex flex-col gap-2">
+                  {role === 'admin' && (
+                    <div className="flex flex-wrap gap-3">
+                      <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+                        <input
+                          type="checkbox"
+                          checked={targetRoles.students}
+                          onChange={() => setTargetRoles((prev) => ({ ...prev, students: !prev.students }))}
+                          className="h-4 w-4 rounded border-gray-300 dark:border-gray-700"
+                        />
+                        Students
+                      </label>
+                      <label className="flex items-center gap-2 text-xs text-gray-600 dark:text-gray-300">
+                        <input
+                          type="checkbox"
+                          checked={targetRoles.teachers}
+                          onChange={() => setTargetRoles((prev) => ({ ...prev, teachers: !prev.teachers }))}
+                          className="h-4 w-4 rounded border-gray-300 dark:border-gray-700"
+                        />
+                        Teachers
+                      </label>
+                    </div>
+                  )}
+
+                  {(role === 'teacher' || targetRoles.students) && (
+                    <div className="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                      <select
+                        value={studentTarget.department}
+                        onChange={(e) => setStudentTarget((prev) => ({ ...prev, department: e.target.value }))}
+                        className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-xs"
+                      >
+                        <option value="">All departments</option>
+                        {announcementFilters.student.departments.map((dept) => (
+                          <option key={`dept-${dept}`} value={dept}>{dept}</option>
+                        ))}
+                      </select>
+                      <select
+                        value={studentTarget.yearOfStudy}
+                        onChange={(e) => setStudentTarget((prev) => ({ ...prev, yearOfStudy: e.target.value }))}
+                        className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-xs"
+                      >
+                        <option value="">All years</option>
+                        {announcementFilters.student.years.map((year) => (
+                          <option key={`year-${year}`} value={year}>{year}</option>
+                        ))}
+                      </select>
+                      <select
+                        value={studentTarget.section}
+                        onChange={(e) => setStudentTarget((prev) => ({ ...prev, section: e.target.value }))}
+                        className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-xs"
+                      >
+                        <option value="">All sections</option>
+                        {announcementFilters.student.sections.map((section) => (
+                          <option key={`section-${section}`} value={section}>{section}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+
+                  {role === 'admin' && targetRoles.teachers && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                      <select
+                        value={teacherTarget.department}
+                        onChange={(e) => setTeacherTarget((prev) => ({ ...prev, department: e.target.value }))}
+                        className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-xs"
+                      >
+                        <option value="">All departments (teachers)</option>
+                        {announcementFilters.teacher.departments.map((dept) => (
+                          <option key={`tdept-${dept}`} value={dept}>{dept}</option>
+                        ))}
+                      </select>
+                    </div>
+                  )}
+                </div>
                 <div className="flex flex-col gap-1">
                   <label className="text-[11px] font-medium text-gray-500 dark:text-gray-400">
                     Extra class date / pin until
@@ -408,6 +572,7 @@ export default function TopHeader({ title }) {
                     type="date"
                     value={newPinnedUntil}
                     onChange={(e) => setNewPinnedUntil(e.target.value)}
+                    min={new Date().toISOString().split('T')[0]}
                     className="w-full px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 text-sm"
                   />
                   <p className="text-[11px] text-gray-400 dark:text-gray-500">
@@ -441,6 +606,14 @@ export default function TopHeader({ title }) {
               />
             </div>
 
+            <button
+              type="button"
+              onClick={() => setShowClearConfirm(true)}
+              className="text-xs px-3 py-2 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800 transition-colors"
+            >
+              Clear all announcements
+            </button>
+
             {loading ? (
               <p className="text-xs text-gray-500 dark:text-gray-400">Loading announcements...</p>
             ) : visibleAnnouncements.length === 0 ? (
@@ -452,14 +625,34 @@ export default function TopHeader({ title }) {
                 {visibleAnnouncements.map((item) => (
                   <article key={item.id} className="rounded-xl border border-gray-200 dark:border-gray-700 p-3 bg-white dark:bg-gray-900/80">
                     <div className="flex items-start justify-between gap-2">
-                      <p className="text-sm font-semibold text-gray-800 dark:text-white">
-                        {highlightText(item.title, announcementSearch)}
-                      </p>
-                      {isAnnouncementPinned(item) && (
-                        <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
-                          Pinned
-                        </span>
-                      )}
+                      <div>
+                        <p className="text-sm font-semibold text-gray-800 dark:text-white">
+                          {highlightText(item.title, announcementSearch)}
+                        </p>
+                      </div>
+                      <div className="flex items-center gap-2">
+                        {isAnnouncementPinned(item) && (
+                          <span className="inline-flex items-center rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-[10px] font-semibold text-amber-700 dark:border-amber-900/40 dark:bg-amber-950/30 dark:text-amber-300">
+                            Pinned
+                          </span>
+                        )}
+                        <button
+                          type="button"
+                          onClick={() => handleDismissAnnouncement(item.id)}
+                          className="text-[10px] px-2 py-1 rounded-lg border border-gray-200 text-gray-600 hover:bg-gray-50 dark:border-gray-700 dark:text-gray-300 dark:hover:bg-gray-800"
+                        >
+                          Hide
+                        </button>
+                        {(item.createdBy?.id === user?.id || role === 'admin') && (
+                          <button
+                            type="button"
+                            onClick={() => setPendingDeleteId(item.id)}
+                            className="text-[10px] px-2 py-1 rounded-lg border border-red-200 text-red-500 hover:bg-red-50 dark:border-red-900/40 dark:text-red-300 dark:hover:bg-red-950/30"
+                          >
+                            Delete
+                          </button>
+                        )}
+                      </div>
                     </div>
                     <p className="text-sm text-gray-600 dark:text-gray-300 mt-1 whitespace-pre-wrap">
                       {highlightText(item.message, announcementSearch)}
@@ -476,6 +669,70 @@ export default function TopHeader({ title }) {
               </div>
             )}
           </div>
+          </>
+        )}
+
+        {showClearConfirm && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setShowClearConfirm(false)} />
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <div className="w-full max-w-sm rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-2xl p-4 flex flex-col gap-3">
+                <p className="text-sm font-semibold text-gray-800 dark:text-white">Clear all announcements?</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  This will hide all announcements for you. Others will still see them.
+                </p>
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setShowClearConfirm(false)}
+                    className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={handleClearAnnouncements}
+                    className="text-xs px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white"
+                  >
+                    Clear all
+                  </button>
+                </div>
+              </div>
+            </div>
+          </>
+        )}
+
+        {pendingDeleteId && (
+          <>
+            <div className="fixed inset-0 z-40" onClick={() => setPendingDeleteId(null)} />
+            <div className="fixed inset-0 z-50 flex items-center justify-center p-4">
+              <div className="w-full max-w-sm rounded-2xl border border-gray-200 dark:border-gray-700 bg-white dark:bg-gray-900 shadow-2xl p-4 flex flex-col gap-3">
+                <p className="text-sm font-semibold text-gray-800 dark:text-white">Delete this announcement?</p>
+                <p className="text-xs text-gray-500 dark:text-gray-400">
+                  This will remove it for everyone, including students and teachers.
+                </p>
+                <div className="flex items-center justify-end gap-2">
+                  <button
+                    type="button"
+                    onClick={() => setPendingDeleteId(null)}
+                    className="text-xs px-3 py-1.5 rounded-lg border border-gray-200 dark:border-gray-700 text-gray-600 dark:text-gray-300 hover:bg-gray-100 dark:hover:bg-gray-800"
+                  >
+                    Cancel
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => {
+                      const targetId = pendingDeleteId
+                      setPendingDeleteId(null)
+                      handleDeleteAnnouncement(targetId)
+                    }}
+                    className="text-xs px-3 py-1.5 rounded-lg bg-red-600 hover:bg-red-700 text-white"
+                  >
+                    Delete
+                  </button>
+                </div>
+              </div>
+            </div>
           </>
         )}
 
