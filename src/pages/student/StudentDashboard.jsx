@@ -129,10 +129,10 @@ const NumberCounter = ({ value, duration = 1.5, className = "" }) => {
 // 3. Smooth & Sexy Holographic Trend Chart
 const HolographicTrendChart = ({ dailyData }) => {
   // Filter only days that actually had classes so the trend is meaningful
-  // Show fewer bars on mobile to prevent date label overlap
+  // Always show the last 7 active days
   const allActiveDays = dailyData.filter(d => d.total > 0);
   const isMobile = typeof window !== 'undefined' && window.innerWidth < 640;
-  const activeDays = allActiveDays.slice(isMobile ? -7 : -14);
+  const activeDays = allActiveDays.slice(-7);
   
   if (activeDays.length === 0) {
     return (
@@ -163,6 +163,8 @@ const HolographicTrendChart = ({ dailyData }) => {
           const pct = Math.round((present / total) * 100);
           const isPerfect = pct === 100;
           const isDanger = pct < 75;
+          const label = new Date(day.date).toLocaleDateString('en-US', { month: 'short', day: 'numeric' })
+          const showLabel = true
           
           let gradient = 'from-emerald-400 to-emerald-600';
           let shadow = 'rgba(52,211,153,0.4)';
@@ -220,8 +222,8 @@ const HolographicTrendChart = ({ dailyData }) => {
               />
 
               {/* Date Label */}
-              <span className="absolute -bottom-9 sm:-bottom-7 left-1/2 -translate-x-1/2 text-[8px] sm:text-[10px] font-bold text-white/40 whitespace-nowrap origin-center -rotate-45 sm:rotate-0">
-                {new Date(day.date).toLocaleDateString('en-US', { day: 'numeric', month: 'short' })}
+              <span className={`absolute -bottom-9 sm:-bottom-7 left-1/2 -translate-x-1/2 text-[8px] sm:text-[10px] font-semibold text-white/40 whitespace-nowrap ${showLabel ? 'opacity-100' : 'opacity-0'}`}>
+                {label}
               </span>
             </div>
           );
